@@ -5,7 +5,7 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Index, Mul, MulAssign, Rem, RemAs
 
 #[derive(Debug, PartialEq)]
 pub struct NdArray<T> {
-    data: Vec<T>,
+    data: Box<[T]>,
     shape: Vec<usize>,
     strides: Vec<usize>,
     is_contiguous: bool
@@ -184,14 +184,14 @@ impl <T> NdArray<T> {
 
         match validate_contiguous_stride(&like, &strides) {
             Ok(_) => Self {
-                data,
+                data: data.into_boxed_slice(),
                 shape: like,
                 strides,
                 is_contiguous: true
             },
             Err(_) => match validate_view(&like, &like, &strides) {
                 Ok(_) => Self {
-                    data,
+                    data: data.into_boxed_slice(),
                     shape: like,
                     strides,
                     is_contiguous: false
@@ -852,7 +852,7 @@ impl <'a, T> Iterator for NdArrayDataIndexIterator<'a, T> {
         }
 
         let index = compute_index(&self.index, self.ref_data_strides);
-        if index < 0 || index >= self.ref_data_len {
+        if index >= self.ref_data_len {
             panic!(
                 "Index out of bounds. Index: {:?}, array shape: {:?}, array strides: {:?}. array data len: {}",
                 self.index, self.ref_data_shape, self.ref_data_strides, self.ref_data_len
