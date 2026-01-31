@@ -636,8 +636,8 @@ where L: AddAssign, R: Into<L> + Clone {
         }
 
         let iter: Vec<Vec<usize>> = self.iter_index().collect();
-        for index in iter {
-            let (self_index, rhs_index) = (self.compute_index(&index), rhs.compute_index(&index));
+        for indices in iter {
+            let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
             self.data_mut()[self_index] += rhs.data()[rhs_index].clone().into();
         }
     }
@@ -852,7 +852,7 @@ impl <'a, T> Iterator for NdArrayDataIndexIterator<'a, T> {
         }
 
         let index = compute_index(&self.index, self.ref_data_strides);
-        if index < 0 || index > self.ref_data_len {
+        if index < 0 || index >= self.ref_data_len {
             panic!(
                 "Index out of bounds. Index: {:?}, array shape: {:?}, array strides: {:?}. array data len: {}",
                 self.index, self.ref_data_shape, self.ref_data_strides, self.ref_data_len
