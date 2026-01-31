@@ -1,7 +1,7 @@
 use std::cmp::max;
 use std::iter::zip;
 use std::marker::PhantomData;
-use std::ops::{Index, Add, Sub, Mul, Div, Rem, AddAssign, SubAssign, MulAssign, DivAssign, RemAssign};
+use std::ops::{Add, AddAssign, Div, DivAssign, Index, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
 
 #[derive(Debug, PartialEq)]
 pub struct NdArray<T> {
@@ -14,7 +14,7 @@ pub struct NdArray<T> {
 #[derive(Clone, Copy)]
 pub enum NdArraySource<'a, T> {
     Owned(&'a NdArray<T>),
-    View(&'a dyn NdArrayLike<'a, T>)
+    View(&'a dyn NdArrayLike<T>)
 }
 
 pub struct NdArrayView<'a, T> {
@@ -23,12 +23,22 @@ pub struct NdArrayView<'a, T> {
     strides: Vec<usize>,
 }
 
-pub struct NdArrayIterator<'a, S, T> {
-    data: S,
+pub struct NdArrayIterator<'a, T> {
+    data: &'a dyn NdArrayLike<T>,
     index: Vec<usize>,
     axis_counter: usize,
     has_done: bool,
-    _marker: PhantomData<&'a T>,
+}
+
+// Iter index by NdArray shape and stride
+pub struct NdArrayDataIndexIterator<'a, T> {
+    ref_data_len: usize,
+    ref_data_shape: &'a [usize],
+    ref_data_strides: &'a [usize],
+    index: Vec<usize>,
+    axis_counter: usize,
+    has_done: bool,
+    _marker: PhantomData<&'a dyn NdArrayLike<T>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -45,32 +55,25 @@ pub trait Cast<NewT> {
     fn cast(self) -> Self::Target;
 }
 
-pub trait NdArrayLike<'a, T> {
-    fn data(&self) -> &'a [T];
+pub trait NdArrayLike<T> {
+    fn data<'a, 'b: 'a>(&'b self) -> &'a [T];
     fn shape(&self) -> &[usize];
     fn strides(&self) -> &[usize];
     fn is_contiguous(&self) -> bool;
-
     fn compute_index(&self, indices: &[usize]) -> usize {
-        if indices.len() != self.strides().len() {
-            panic!(
-                "Indices length ({}) does not match NdArray dimensions ({})",
-                indices.len(),
-                self.strides().len()
-            );
-        }
-
-        indices.iter()
-            .enumerate()
-            .fold(0, |acc, (axis, &x)| acc + x * self.strides()[axis])
+        compute_index(self.shape(), indices)
+    }
+    fn to_view<'a, 'b: 'a>(&'b self) -> NdArrayView<'a, T>;
+    fn iter_index(&'_ self) -> NdArrayDataIndexIterator<'_, T>
+    where Self: Sized {
+        NdArrayDataIndexIterator::new(self)
     }
 }
 
-impl <'a, T> NdArrayLike<'a, T> for &'a NdArray<T> {
-    fn data(&self) -> &'a [T] {
+impl <T> NdArrayLike<T> for NdArray<T> {
+    fn data<'a, 'b: 'a>(&'b self) -> &'a [T] {
         &self.data
     }
-
     fn shape(&self) -> &[usize] {
         &self.shape
     }
@@ -80,13 +83,33 @@ impl <'a, T> NdArrayLike<'a, T> for &'a NdArray<T> {
     fn is_contiguous(&self) -> bool {
         self.is_contiguous
     }
+    fn to_view<'a, 'b: 'a>(&'b self) -> NdArrayView<'a, T> {
+        NdArrayView::new(NdArraySource::Owned(self), self.shape.clone(), self.strides.clone())
+    }
 }
 
-impl <'a, T> NdArrayLike<'a, T> for NdArrayView<'a, T> {
-    fn data(&self) -> &'a [T] {
+impl <'a, T> NdArrayLike<T> for &'a NdArray<T> {
+    fn data<'b, 'c: 'b>(&'c self) -> &'b [T] {
+        &self.data
+    }
+    fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+    fn strides(&self) -> &[usize] {
+        &self.strides
+    }
+    fn is_contiguous(&self) -> bool {
+        self.is_contiguous
+    }
+    fn to_view<'b, 'c: 'b>(&'c self) -> NdArrayView<'b, T> {
+        NdArrayView::new(NdArraySource::Owned(self), self.shape.clone(), self.strides.clone())
+    }
+}
+
+impl <'a, T> NdArrayLike<T> for NdArrayView<'a, T> {
+    fn data<'b, 'c: 'b>(&'c self) -> &'b [T] {
         self.data.data()
     }
-
     fn shape(&self) -> &[usize] {
         &self.shape
     }
@@ -96,40 +119,46 @@ impl <'a, T> NdArrayLike<'a, T> for NdArrayView<'a, T> {
     fn is_contiguous(&self) -> bool {
         self.shape == self.data.shape()
     }
+    fn to_view<'b, 'c: 'b>(&'c self) -> NdArrayView<'b, T> {
+        NdArrayView::new(NdArraySource::View(self), self.shape.clone(), self.strides.clone())
+    }
 }
 
-impl <'a, T> NdArrayLike<'a, T> for NdArraySource<'a, T> {
-    fn data(&self) -> &'a [T] {
+impl <'a, T> NdArrayLike<T> for NdArraySource<'a, T> {
+    fn data<'b, 'c: 'b>(&'c self) -> &'b [T] {
         match self {
             NdArraySource::Owned(array) => &array.data,
             NdArraySource::View(view) => view.data()
         }
     }
-
     fn shape(&self) -> &[usize] {
         match self {
             NdArraySource::Owned(array) => &array.shape,
             NdArraySource::View(view) => view.shape()
         }
     }
-
     fn strides(&self) -> &[usize] {
         match self {
             NdArraySource::Owned(array) => &array.strides,
             NdArraySource::View(view) => view.strides()
         }
     }
-
     fn is_contiguous(&self) -> bool {
         match self {
             NdArraySource::Owned(array) => array.is_contiguous,
             NdArraySource::View(view) => view.is_contiguous()
         }
     }
+    fn to_view<'b, 'c: 'b>(&'c self) -> NdArrayView<'b, T> {
+        match self {
+            NdArraySource::Owned(array) => array.to_view(),
+            NdArraySource::View(view) => view.to_view()
+        }
+    }
 }
 
-impl <'a, 'b, T> NdArrayLike<'a, T> for &'b NdArrayView<'a, T> {
-    fn data(&self) -> &'a [T] {
+impl <'a, 'b: 'a, T> NdArrayLike<T> for &'b NdArrayView<'a, T> {
+    fn data<'c, 'd: 'c>(&'d self) -> &'c [T] {
         self.data.data()
     }
     fn shape(&self) -> &[usize] {
@@ -141,9 +170,12 @@ impl <'a, 'b, T> NdArrayLike<'a, T> for &'b NdArrayView<'a, T> {
     fn is_contiguous(&self) -> bool {
         (*self).is_contiguous()
     }
+    fn to_view<'c, 'd: 'c>(&'d self) -> NdArrayView<'c, T> {
+        NdArrayView::new(NdArraySource::View(self), self.shape.clone(), self.strides.clone())
+    }
 }
 
-impl <T: Clone> NdArray<T> {
+impl <T> NdArray<T> {
     pub fn new_like_with_strides(data: Vec<T>, like: Vec<usize>, strides: Vec<usize>) -> Self {
         if data.len() != like.iter().product() {
             panic!("Data length ({}) does not match shape dimensions ({:?}), shape except {} length data.",
@@ -170,20 +202,12 @@ impl <T: Clone> NdArray<T> {
     }
 
     pub fn new_like(data: Vec<T>, like: Vec<usize>) -> Self {
+        let stride = compute_stride(&like);
+
         Self::new_like_with_strides(
             data,
-            like.to_vec(),
-            like.into_iter()
-                .rev()
-                .scan(1, |acc, x| {
-                    let tmp = *acc;
-                    *acc *= x;
-                    Some(tmp)
-                })
-                .collect::<Vec<usize>>()
-                .into_iter()
-                .rev()
-                .collect(),
+            like,
+            stride,
         )
     }
 
@@ -192,13 +216,15 @@ impl <T: Clone> NdArray<T> {
         Self::new_like(data, shape)
     }
 
-    pub fn to_view(&self) -> NdArrayView<T> {
-        NdArrayView::new(NdArraySource::Owned(self), self.shape.clone(), self.strides.clone())
+    pub fn data_mut(&mut self) -> &mut [T] {
+        &mut self.data
     }
+}
 
-    pub fn contiguous(&self) -> Self {
+impl <T: Clone> NdArray<T> {
+    pub fn contiguous(self) -> Self {
         if self.is_contiguous {
-            Self::new_like_with_strides(self.data.clone(), self.shape.clone(), self.strides.clone())
+            self
         } else {
             let mut data: Vec<T> = Vec::with_capacity(self.data.len());
 
@@ -228,9 +254,8 @@ impl <'a, T> NdArrayView<'a, T> {
     }
 }
 
-impl <'a, S, T> NdArrayIterator<'a, S, T>
-where S: NdArrayLike<'a, T> {
-    pub fn new(array: S) -> Self {
+impl <'a, T> NdArrayIterator<'a, T> {
+    pub fn new<'b: 'a>(array: &'b dyn NdArrayLike<T>) -> Self {
         let rank = array.shape().len();
 
         Self {
@@ -238,9 +263,38 @@ where S: NdArrayLike<'a, T> {
             index: vec![0; rank],
             axis_counter: rank - 1,
             has_done: false,
-            _marker: PhantomData,
         }
     }
+}
+
+impl <'a, T> NdArrayDataIndexIterator<'a, T> {
+    pub fn new<'b: 'a>(array: &'b dyn NdArrayLike<T>) -> Self {
+        let rank = array.shape().len();
+
+        Self {
+            ref_data_len: array.data().len(),
+            ref_data_shape: array.shape(),
+            ref_data_strides: array.strides(),
+            index: vec![0; rank],
+            axis_counter: rank - 1,
+            has_done: false,
+            _marker: PhantomData
+        }
+    }
+}
+
+fn compute_index(indices: &[usize], strides: &[usize]) -> usize {
+    if indices.len() != strides.len() {
+        panic!(
+            "Indices length ({}) does not match NdArray dimensions ({})",
+            indices.len(),
+            strides.len()
+        );
+    }
+
+    indices.iter()
+        .enumerate()
+        .fold(0, |acc, (axis, &x)| acc + x * strides[axis])
 }
 
 fn validate_view(old_shape: &[usize], view_shape: &[usize], view_stride: &[usize]) -> Result<(), NdArrayError> {
@@ -321,6 +375,20 @@ fn validate_contiguous_stride(shape: &[usize], strides: &[usize]) -> Result<(), 
         }
         Ok(())
     }
+}
+
+fn compute_stride(shape: &[usize]) -> Vec<usize> {
+    shape.into_iter()
+        .rev()
+        .scan(1, |acc, x| {
+            let tmp = *acc;
+            *acc *= x;
+            Some(tmp)
+        })
+        .collect::<Vec<usize>>()
+        .into_iter()
+        .rev()
+        .collect()
 }
 
 /// ```rust
@@ -448,14 +516,14 @@ pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<Vec<usize>, NdAr
 ///   modifications during stride computation.
 pub fn broadcast_array<'a, 'b, L, R, LT, RT>(lhs: &'a LT, rhs: &'b RT)
     -> Result<(NdArrayView<'a, L>, NdArrayView<'b, R>), NdArrayError>
-where LT: NdArrayLike<'a, L>, RT: NdArrayLike<'b, R>, {
+where LT: NdArrayLike<L>, RT: NdArrayLike<R>, {
     match broadcast_shapes(&lhs.shape(), &rhs.shape()) {
         Ok(batch_shape) => {
             let rhs_shape = batch_shape.clone();
             let lhs_shape = batch_shape;
 
-            fn compute_strides<'a, T, DT>(old_array: &T, broadcast_shape: &[usize]) -> Vec<usize>
-            where T: NdArrayLike<'a, DT>, {
+            fn compute_strides<T, DT>(old_array: &T, broadcast_shape: &[usize]) -> Vec<usize>
+            where T: NdArrayLike<DT>, {
                 let mut strides: Vec<usize> = Vec::with_capacity(broadcast_shape.len());
 
                 let mut old_shape_iter = old_array.shape().iter().rev();
@@ -553,19 +621,25 @@ where L: Add<Output=L> + Clone, R: Into<L> + Clone {
 /// assert_eq!(a, NdArray::new_like(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast() * Scalar(2i8));
 /// ```
 impl <L, R> AddAssign<NdArray<R>> for NdArray<L>
-where L: AddAssign, R: Into<L> {
+where L: AddAssign, R: Into<L> + Clone {
     fn add_assign(&mut self, rhs: NdArray<R>) {
-        if self.shape != rhs.shape {
-            panic!("Cannot add arrays of different shapes. self: {:?}, other: {:?}", self.shape, rhs.shape);
+        let (lhs, rhs) = match broadcast_array(self, &rhs) {
+            Ok((lhs, rhs)) => (lhs, rhs),
+            Err(e) => panic!("{:?}", e)
+        };
+
+        if lhs.shape() != self.shape() {
+            panic!(
+                "self shape {:?} can't broadcast when operate += operator, which is cause by rhs shape {:?}",
+                self.shape(), rhs.shape()
+            )
         }
 
-        if self.strides != rhs.strides {
-            panic!("Cannot add arrays of different strides. self: {:?}, other: {:?}", self.strides, rhs.strides);
+        let iter: Vec<Vec<usize>> = self.iter_index().collect();
+        for index in iter {
+            let (self_index, rhs_index) = (self.compute_index(&index), rhs.compute_index(&index));
+            self.data_mut()[self_index] += rhs.data()[rhs_index].clone().into();
         }
-
-        self.data.iter_mut()
-            .zip(rhs.data.into_iter())
-            .for_each(|(a, b)| *a += b.into());
     }
 }
 
@@ -573,46 +647,23 @@ impl <L, R> Sub<NdArray<R>> for NdArray<L>
 where L: Sub<Output=L> + Clone, R: Into<L> {
     type Output = Self;
 
-    fn sub(self, rhs: NdArray<R>) -> Self {
-        if self.shape != rhs.shape {
-            panic!("Cannot add arrays of different shapes. self: {:?}, other: {:?}", self.shape, rhs.shape);
-        }
-
-        if self.strides != rhs.strides {
-            panic!("Cannot add arrays of different strides. self: {:?}, other: {:?}", self.strides, rhs.strides);
-        }
-
-        Self::new_like_with_strides(
-            zip(self.data, rhs.data)
-                .map(|(a, b)| a - b.into()).collect(),
-            self.shape,
-            self.strides,
-        )
+    fn sub(self, _rhs: NdArray<R>) -> Self {
+        todo!()
     }
 }
 
 impl <L, R> SubAssign<NdArray<R>> for NdArray<L>
 where L: SubAssign, R: Into<L> {
-    fn sub_assign(&mut self, rhs: NdArray<R>) {
-        if self.shape != rhs.shape {
-            panic!("Cannot add arrays of different shapes. self: {:?}, other: {:?}", self.shape, rhs.shape);
-        }
-
-        if self.strides != rhs.strides {
-            panic!("Cannot add arrays of different strides. self: {:?}, other: {:?}", self.strides, rhs.strides);
-        }
-
-        self.data.iter_mut()
-            .zip(rhs.data.into_iter())
-            .for_each(|(a, b)| *a -= b.into());
+    fn sub_assign(&mut self, _rhs: NdArray<R>) {
+        todo!()
     }
 }
 
-impl <T, ScalerT> Mul<Scalar<ScalerT>> for NdArray<T>
-where T: Mul<Output=T> + Clone, ScalerT: Into<T> + Clone {
+impl <T, ST> Mul<Scalar<ST>> for NdArray<T>
+where T: Mul<Output=T> + Clone, ST: Into<T> + Clone {
     type Output = Self;
 
-    fn mul(self, rhs: Scalar<ScalerT>) -> Self::Output {
+    fn mul(self, rhs: Scalar<ST>) -> Self::Output {
         Self::new_like_with_strides(
             self.data.into_iter().map(|x| x * rhs.0.clone().into()).collect(),
             self.shape,
@@ -621,19 +672,28 @@ where T: Mul<Output=T> + Clone, ScalerT: Into<T> + Clone {
     }
 }
 
-impl <T, ScalerT> MulAssign<Scalar<ScalerT>> for NdArray<T>
-where T: MulAssign, ScalerT: Into<T> + Clone {
-    fn mul_assign(&mut self, rhs: Scalar<ScalerT>) {
+impl <ST, T> Mul<NdArray<T>> for Scalar<ST>
+where ST: Into<T> + Clone, T: Mul<Output=T> + Clone {
+    type Output = NdArray<T>;
+
+    fn mul(self, rhs: NdArray<T>) -> Self::Output {
+        rhs * self
+    }
+}
+
+impl <T, ST> MulAssign<Scalar<ST>> for NdArray<T>
+where T: MulAssign, ST: Into<T> + Clone {
+    fn mul_assign(&mut self, rhs: Scalar<ST>) {
         self.data.iter_mut()
             .for_each(|x| *x *= rhs.0.clone().into());
     }
 }
 
-impl <T, ScalerT> Div<Scalar<ScalerT>> for NdArray<T>
-where T: Div<Output=T> + Clone, ScalerT: Into<T> + Clone {
+impl <T, ST> Div<Scalar<ST>> for NdArray<T>
+where T: Div<Output=T> + Clone, ST: Into<T> + Clone {
     type Output = Self;
 
-    fn div(self, rhs: Scalar<ScalerT>) -> Self::Output {
+    fn div(self, rhs: Scalar<ST>) -> Self::Output {
         Self::new_like_with_strides(
             self.data.into_iter().map(|x| x / rhs.0.clone().into()).collect(),
             self.shape,
@@ -642,28 +702,18 @@ where T: Div<Output=T> + Clone, ScalerT: Into<T> + Clone {
     }
 }
 
-impl <T, ScalerT> DivAssign<Scalar<ScalerT>> for NdArray<T>
-where T: DivAssign, ScalerT: Into<T> + Clone {
-    fn div_assign(&mut self, rhs: Scalar<ScalerT>) {
+impl <T, ST> DivAssign<Scalar<ST>> for NdArray<T>
+where T: DivAssign, ST: Into<T> + Clone {
+    fn div_assign(&mut self, rhs: Scalar<ST>) {
         self.data.iter_mut()
             .for_each(|x| *x /= rhs.0.clone().into());
-    }
-}
-
-impl <ScalerT, T> Mul<NdArray<T>> for Scalar<ScalerT>
-where ScalerT: Into<T> + Clone, T: Mul<Output=T> + Clone {
-    type Output = NdArray<T>;
-
-    fn mul(self, rhs: NdArray<T>) -> Self::Output {
-        rhs * self
     }
 }
 
 
 // Scalar math op
 impl <L, R> Add<Scalar<R>> for Scalar<L>
-where L: Add<Output=L>,
-      R: Into<L> {
+where L: Add<Output=L>, R: Into<L> {
     type Output = Self;
 
     fn add(self, rhs: Scalar<R>) -> Self::Output {
@@ -672,8 +722,7 @@ where L: Add<Output=L>,
 }
 
 impl <L, R> Sub<Scalar<R>> for Scalar<L>
-where L: Sub<Output=L>,
-      R: Into<L> {
+where L: Sub<Output=L>, R: Into<L> {
     type Output = Self;
 
     fn sub(self, rhs: Scalar<R>) -> Self {
@@ -682,8 +731,7 @@ where L: Sub<Output=L>,
 }
 
 impl <L, R> Mul<Scalar<R>> for Scalar<L>
-where L: Mul<Output=L>,
-      R: Into<L> {
+where L: Mul<Output=L>, R: Into<L> {
     type Output = Self;
 
     fn mul(self, rhs: Scalar<R>) -> Self::Output {
@@ -692,8 +740,7 @@ where L: Mul<Output=L>,
 }
 
 impl <L, R> Div<Scalar<R>> for Scalar<L>
-where L: Div<Output=L>,
-      R: Into<L> {
+where L: Div<Output=L>, R: Into<L> {
     type Output = Self;
 
     fn div(self, rhs: Scalar<R>) -> Self::Output {
@@ -702,8 +749,7 @@ where L: Div<Output=L>,
 }
 
 impl <L, R> Rem<Scalar<R>> for Scalar<L>
-where L: Rem<Output=L>,
-      R: Into<L> {
+where L: Rem<Output=L>, R: Into<L> {
     type Output = Self;
 
     fn rem(self, rhs: Scalar<R>) -> Self::Output {
@@ -712,24 +758,21 @@ where L: Rem<Output=L>,
 }
 
 impl <L, R> AddAssign<Scalar<R>> for Scalar<L>
-where L: AddAssign,
-      R: Into<L> {
+where L: AddAssign, R: Into<L> {
     fn add_assign(&mut self, rhs: Scalar<R>) {
         self.0 += rhs.0.into()
     }
 }
 
 impl <L, R> SubAssign<Scalar<R>> for Scalar<L>
-where L: SubAssign,
-      R: Into<L> {
+where L: SubAssign, R: Into<L> {
     fn sub_assign(&mut self, rhs: Scalar<R>) {
         self.0 -= rhs.0.into()
     }
 }
 
 impl <L, R> MulAssign<Scalar<R>> for Scalar<L>
-where L: MulAssign,
-      R: Into<L> {
+where L: MulAssign, R: Into<L> {
     fn mul_assign(&mut self, rhs: Scalar<R>) {
         self.0 *= rhs.0.into()
     }
@@ -752,7 +795,7 @@ where L: RemAssign, R: Into<L> {
 
 // Indexing
 impl <T, Idx> Index<Idx> for NdArray<T>
-where T: Add<Output=T> + Copy, Idx: Into<Vec<usize>>{
+where T: Add<Output=T>, Idx: Into<Vec<usize>>{
     type Output = T;
 
     fn index(&self, index: Idx) -> &Self::Output {
@@ -762,8 +805,7 @@ where T: Add<Output=T> + Copy, Idx: Into<Vec<usize>>{
 
 
 // Iterators
-impl <'a, S, T> Iterator for NdArrayIterator<'a, S, T>
-where S: NdArrayLike<'a, T>, T: 'a {
+impl <'a, T> Iterator for NdArrayIterator<'a, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -779,7 +821,9 @@ where S: NdArrayLike<'a, T>, T: 'a {
 
         self.index[self.axis_counter] += 1;
 
+        let mut axis_change = false;
         while self.index[self.axis_counter] >= self.data.shape()[self.axis_counter] {
+            axis_change = true;
             let len = self.index.len();
             self.index[self.axis_counter..len].iter_mut().for_each(|x| *x = 0);
             self.axis_counter = self.axis_counter.wrapping_sub(1);
@@ -790,9 +834,53 @@ where S: NdArrayLike<'a, T>, T: 'a {
                 break;
             }
         }
-        self.axis_counter = self.index.len() - 1;
+
+        if axis_change {
+            self.axis_counter = self.index.len() - 1;
+        }
 
         Some(ret)
+    }
+}
+
+impl <'a, T> Iterator for NdArrayDataIndexIterator<'a, T> {
+    type Item = Vec<usize>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.has_done {
+            return None;
+        }
+
+        let index = compute_index(&self.index, self.ref_data_strides);
+        if index < 0 || index > self.ref_data_len {
+            panic!(
+                "Index out of bounds. Index: {:?}, array shape: {:?}, array strides: {:?}. array data len: {}",
+                self.index, self.ref_data_shape, self.ref_data_strides, self.ref_data_len
+            )
+        }
+        let index = self.index.to_vec();
+
+        self.index[self.axis_counter] += 1;
+
+        let mut axis_change = false;
+        while self.index[self.axis_counter] >= self.ref_data_shape[self.axis_counter] {
+            axis_change = true;
+            let len = self.index.len();
+            self.index[self.axis_counter..len].iter_mut().for_each(|x| *x = 0);
+            self.axis_counter = self.axis_counter.wrapping_sub(1);
+            if self.axis_counter < self.index.len() {
+                self.index[self.axis_counter] += 1;
+            } else {
+                self.has_done = true;
+                break;
+            }
+        }
+
+        if axis_change {
+            self.axis_counter = self.index.len() - 1;
+        }
+
+        Some(index)
     }
 }
 
@@ -805,18 +893,18 @@ where S: NdArrayLike<'a, T>, T: 'a {
 /// let a = NdArray::new_like(Vec::from_iter((1..28).into_iter()), vec![3, 3, 3]);
 /// assert_eq!(a.into_iter().map(|x| *x).collect::<Vec<_>>(), Vec::from_iter((1..28).into_iter()));
 /// ```
-impl <'a, T: Clone> IntoIterator for &'a NdArrayView<'a, T> {
+impl <'a, T> IntoIterator for &'a NdArrayView<'a, T> {
     type Item = &'a T;
-    type IntoIter = NdArrayIterator<'a, &'a NdArrayView<'a, T>, T>;
+    type IntoIter = NdArrayIterator<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         NdArrayIterator::new(self)
     }
 }
 
-impl <'a, T: Clone> IntoIterator for &'a NdArray<T> {
+impl <'a, T> IntoIterator for &'a NdArray<T> {
     type Item = &'a T;
-    type IntoIter = NdArrayIterator<'a, &'a NdArray<T>, T>;
+    type IntoIter = NdArrayIterator<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         NdArrayIterator::new(self)
