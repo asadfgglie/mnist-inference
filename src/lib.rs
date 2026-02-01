@@ -615,7 +615,7 @@ where LT: NdArrayLike<L>, RT: NdArrayLike<R>, {
 
 // NdArray math op
 macro_rules! impl_nd_array_op {
-    ($type:ident, [$(($op:tt, $op_trait:ident, $op_fn:ident)),+]) => {
+    ($type:ident, [$( ($op:tt, $op_trait:ident, $op_fn:ident) ),+]) => {
         $(impl <L, R> $op_trait<$type<R>> for $type<L>
         where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
             type Output = NdArray<L>;
@@ -671,8 +671,8 @@ macro_rules! impl_nd_array_op {
     };
 }
 
-macro_rules! impl_nd_array_ref_op {
-    (($($type:ident),+), $op:tt, $op_trait:ident, $op_fn:ident) => {
+macro_rules! impl_nd_array_ref_op_helper {
+    ($type:ident, [$( ($op:tt, $op_trait:ident, $op_fn:ident) ),+]) => {
         $(
             impl <'a, 'b, L, R> $op_trait<$type<'b, R>> for $type<'a, L>
             where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
@@ -719,9 +719,16 @@ macro_rules! impl_nd_array_ref_op {
     };
 }
 
+macro_rules! impl_nd_array_ref_op {
+    ( ( $($type:ident),+ ), $ops:tt ) => {
+        $(
+            impl_nd_array_ref_op_helper!{$type, $ops}
+        )+
+    };
+}
+
 impl_nd_array_op!{NdArray, [(+, Add, add), (-, Sub, sub)]}
-impl_nd_array_ref_op!{(NdArrayView, NdArraySource), +, Add, add}
-impl_nd_array_ref_op!{(NdArrayView, NdArraySource), -, Sub, sub}
+impl_nd_array_ref_op!{(NdArrayView, NdArraySource), [(+, Add, add), (-, Sub, sub)]}
 // impl_nd_array_op!{NdArray, -, Sub, sub}
 
 /// ```
