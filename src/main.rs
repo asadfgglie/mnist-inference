@@ -1,15 +1,6 @@
+use mnist_inference::*;
 fn main() {
-    let a = 0;
-    let b = 1;
-    let mut c = 2;
-    let mut d = 3;
-
-    a + b;
-    &a + b;
-    a + &b;
-    &a + &b;
-    c + d;
-    &d + c;
-    // (&mut d) += c; // error
-
+    let mut a: NdArray<f32> = NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast();
+    a += NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]);
+    assert_eq!(a, NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast() * Scalar(2i8));
 }

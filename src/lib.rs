@@ -1,6 +1,6 @@
 use std::cmp::max;
 use std::iter::zip;
-use std::ops::{Add, AddAssign, Div, DivAssign, Index, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, DivAssign, Index, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign, Deref};
 
 #[derive(Debug, PartialEq)]
 pub struct NdArray<T> {
@@ -250,6 +250,21 @@ impl <T> NdArray<T> {
     pub fn new(data: Vec<T>) -> Self {
         let shape = vec![data.len()];
         Self::new_shape(data, shape)
+    }
+
+    pub fn item(self) -> Scalar<T> {
+        if self.shape != vec![1] {
+            panic!(
+                "shape must be 1 dimension 1 element array, but got {:?}", self.shape
+            )
+        }
+        let self_info = format!(
+            "self.shape: {:?}, self.stride: {:?}, self.data.len: {}",
+            self.shape, self.strides, self.data.len()
+        );
+        self.data.into_vec().pop().expect(&format!(
+            "self.data seems empty, but this should not happen. {}", self_info
+        )).into()
     }
 }
 
@@ -614,65 +629,206 @@ where LT: NdArrayLike<L>, RT: NdArrayLike<R>, {
 
 
 // NdArray math op
-macro_rules! impl_nd_array_op {
-    ($type:ident, [$( ($op:tt, $op_trait:ident, $op_fn:ident) ),+]) => {
-        $(impl <L, R> $op_trait<$type<R>> for $type<L>
-        where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
-            type Output = NdArray<L>;
+// all NdArrayLike op will through broadcast_array() then become a `NdArrayView`
+// so if &NdArrayView $op &NdArrayView is implement => NdArray, NdArrayView, NdArraySource
+// and their & version also implement by those macros
+// note that all op is element wise operation
+macro_rules! nd_array_op {
+    ($( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+) => {
+        $(
+            impl <L, R> $op_trait<NdArray<R>> for NdArray<L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
+                type Output = NdArray<L>;
 
-            fn $op_fn(self, rhs: $type<R>) -> Self::Output {
-                let (lhs, rhs) = match broadcast_array(&self, &rhs) {
-                    Ok((lhs, rhs)) => (lhs, rhs),
-                    Err(e) => panic!("{:?}", e)
-                };
+                fn $op_fn(self, rhs: NdArray<R>) -> Self::Output {
+                    let (lhs, rhs) = match broadcast_array(&self, &rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
 
-                lhs $op rhs
+                    lhs $op rhs
+                }
             }
-        }
-        impl <L, R> $op_trait<&$type<R>> for $type<L>
-        where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
-            type Output = NdArray<L>;
+            impl <L, R> $op_trait<&NdArray<R>> for NdArray<L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
+                type Output = NdArray<L>;
 
-            fn $op_fn(self, rhs: &$type<R>) -> Self::Output {
-                let (lhs, rhs) = match broadcast_array(&self, &rhs) {
-                    Ok((lhs, rhs)) => (lhs, rhs),
-                    Err(e) => panic!("{:?}", e)
-                };
+                fn $op_fn(self, rhs: &NdArray<R>) -> Self::Output {
+                    let (lhs, rhs) = match broadcast_array(&self, &rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
 
-                lhs $op rhs
+                    lhs $op rhs
+                }
             }
-        }
-        impl <L, R> $op_trait<$type<R>> for &$type<L>
-        where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
-            type Output = NdArray<L>;
+            impl <L, R> $op_trait<NdArray<R>> for &NdArray<L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
+                type Output = NdArray<L>;
 
-            fn $op_fn(self, rhs: $type<R>) -> Self::Output {
-                let (lhs, rhs) = match broadcast_array(&self, &rhs) {
-                    Ok((lhs, rhs)) => (lhs, rhs),
-                    Err(e) => panic!("{:?}", e)
-                };
+                fn $op_fn(self, rhs: NdArray<R>) -> Self::Output {
+                    let (lhs, rhs) = match broadcast_array(&self, &rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
 
-                lhs $op rhs
+                    lhs $op rhs
+                }
             }
-        }
-        impl <L, R> $op_trait<&$type<R>> for &$type<L>
-        where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
-            type Output = NdArray<L>;
+            impl <L, R> $op_trait<&NdArray<R>> for &NdArray<L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
+                type Output = NdArray<L>;
 
-            fn $op_fn(self, rhs: &$type<R>) -> Self::Output {
-                let (lhs, rhs) = match broadcast_array(&self, &rhs) {
-                    Ok((lhs, rhs)) => (lhs, rhs),
-                    Err(e) => panic!("{:?}", e)
-                };
+                fn $op_fn(self, rhs: &NdArray<R>) -> Self::Output {
+                    let (lhs, rhs) = match broadcast_array(&self, &rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
 
-                lhs $op rhs
+                    lhs $op rhs
+                }
             }
-        })+
+        )+
     };
 }
 
-macro_rules! impl_nd_array_ref_op_helper {
-    ($type:ident, [$( ($op:tt, $op_trait:ident, $op_fn:ident) ),+]) => {
+macro_rules! nd_array_assign_op {
+    ($( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+) => {
+        $(
+            /// ```
+            /// use mnist_inference::*;
+            /// fn main() {
+            ///     let mut a: NdArray<f32> = NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast();
+            ///     a += NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]);
+            ///     assert_eq!(a, NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast() * Scalar(2i8));
+            /// }
+            /// ```
+            impl <L, R> $op_trait<NdArray<R>> for NdArray<L>
+            where L: $op_trait + Clone, R: Into<L> + Clone {
+                fn $op_fn(&mut self, rhs: NdArray<R>) {
+                    let (lhs, rhs) = match broadcast_array(self, &rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
+
+                    if lhs.shape() != self.shape() {
+                        panic!(
+                            "self shape {:?} can't broadcast when operate += operator, which is cause by rhs shape {:?}",
+                            self.shape(), rhs.shape()
+                        )
+                    }
+
+                    self.contiguous_self();
+
+                    let iter: Vec<Vec<usize>> = self.iter_index().collect();
+                    for indices in iter {
+                        let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
+                        self.data[self_index] $op rhs.data()[rhs_index].clone().into();
+                    }
+                }
+            }
+            impl <L, R> $op_trait<&NdArray<R>> for NdArray<L>
+            where L: $op_trait + Clone, R: Into<L> + Clone {
+                fn $op_fn(&mut self, rhs: &NdArray<R>) {
+                    let (lhs, rhs) = match broadcast_array(self, &rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
+
+                    if lhs.shape() != self.shape() {
+                        panic!(
+                            "self shape {:?} can't broadcast when operate += operator, which is cause by rhs shape {:?}",
+                            self.shape(), rhs.shape()
+                        )
+                    }
+
+                    self.contiguous_self();
+
+                    let iter: Vec<Vec<usize>> = self.iter_index().collect();
+                    for indices in iter {
+                        let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
+                        self.data[self_index] $op rhs.data()[rhs_index].clone().into();
+                    }
+                }
+            }
+            impl <L, R> $op_trait<NdArrayView<'_, R>> for NdArray<L>
+            where L: $op_trait + Clone, R: Into<L> + Clone {
+                fn $op_fn(&mut self, rhs: NdArrayView<'_, R>) {
+                    let (lhs, rhs) = match broadcast_array(self, &rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
+
+                    if lhs.shape() != self.shape() {
+                        panic!(
+                            "self shape {:?} can't broadcast when operate += operator, which is cause by rhs shape {:?}",
+                            self.shape(), rhs.shape()
+                        )
+                    }
+
+                    self.contiguous_self();
+
+                    let iter: Vec<Vec<usize>> = self.iter_index().collect();
+                    for indices in iter {
+                        let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
+                        self.data[self_index] $op rhs.data()[rhs_index].clone().into();
+                    }
+                }
+            }
+            impl <L, R> $op_trait<&NdArrayView<'_, R>> for NdArray<L>
+            where L: $op_trait + Clone, R: Into<L> + Clone {
+                fn $op_fn(&mut self, rhs: &NdArrayView<'_, R>) {
+                    let (lhs, rhs) = match broadcast_array(self, &rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
+
+                    if lhs.shape() != self.shape() {
+                        panic!(
+                            "self shape {:?} can't broadcast when operate += operator, which is cause by rhs shape {:?}",
+                            self.shape(), rhs.shape()
+                        )
+                    }
+
+                    self.contiguous_self();
+
+                    let iter: Vec<Vec<usize>> = self.iter_index().collect();
+                    for indices in iter {
+                        let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
+                        self.data[self_index] $op rhs.data()[rhs_index].clone().into();
+                    }
+                }
+            }
+            impl <L, R> $op_trait<&NdArraySource<'_, R>> for NdArray<L>
+            where L: $op_trait + Clone, R: Into<L> + Clone {
+                fn $op_fn(&mut self, rhs: &NdArraySource<'_, R>) {
+                    let (lhs, rhs) = match broadcast_array(self, &rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
+
+                    if lhs.shape() != self.shape() {
+                        panic!(
+                            "self shape {:?} can't broadcast when operate += operator, which is cause by rhs shape {:?}",
+                            self.shape(), rhs.shape()
+                        )
+                    }
+
+                    self.contiguous_self();
+
+                    let iter: Vec<Vec<usize>> = self.iter_index().collect();
+                    for indices in iter {
+                        let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
+                        self.data[self_index] $op rhs.data()[rhs_index].clone().into();
+                    }
+                }
+            }
+        )+
+    };
+}
+
+macro_rules! nd_array_ref_op_helper {
+    ($type:ident, [ $( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+ ]) => {
         $(
             impl <'a, 'b, L, R> $op_trait<$type<'b, R>> for $type<'a, L>
             where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
@@ -684,7 +840,7 @@ macro_rules! impl_nd_array_ref_op_helper {
                         Err(e) => panic!("{:?}", e)
                     };
 
-                    lhs $op rhs
+                    &lhs $op &rhs
                 }
             }
 
@@ -698,7 +854,7 @@ macro_rules! impl_nd_array_ref_op_helper {
                         Err(e) => panic!("{:?}", e)
                     };
 
-                    lhs $op rhs
+                    &lhs $op rhs
                 }
             }
 
@@ -712,114 +868,62 @@ macro_rules! impl_nd_array_ref_op_helper {
                         Err(e) => panic!("{:?}", e)
                     };
 
-                    lhs $op rhs
+                    lhs $op &rhs
                 }
             }
         )+
     };
 }
 
-macro_rules! impl_nd_array_ref_op {
-    ( ( $($type:ident),+ ), $ops:tt ) => {
+macro_rules! nd_array_ref_op {
+    ( ( $( $type:ident ),+ ), $ops:tt ) => {
         $(
-            impl_nd_array_ref_op_helper!{$type, $ops}
+            nd_array_ref_op_helper!{$type, $ops}
         )+
     };
 }
 
-impl_nd_array_op!{NdArray, [(+, Add, add), (-, Sub, sub)]}
-impl_nd_array_ref_op!{(NdArrayView, NdArraySource), [(+, Add, add), (-, Sub, sub)]}
-// impl_nd_array_op!{NdArray, -, Sub, sub}
+macro_rules! nd_array_view_ref_op {
+    ($( ($op:tt, $op_trait:ident, $op_fn:ident) ),+) => {
+        $(
+            impl <'a, 'b, 'c, 'd, L, R> $op_trait<&'d NdArrayView<'b, R>> for &'c NdArrayView<'a, L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone, 'a: 'c, 'b: 'd {
+                type Output = NdArray<L>;
 
-/// ```
-/// use mnist_inference::*;
-/// let mut a: NdArray<f32> = NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast();
-/// a += NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]);
-/// assert_eq!(a, NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast() * Scalar(2i8));
-/// ```
-impl <L, R> AddAssign<NdArray<R>> for NdArray<L>
-where L: AddAssign + Clone, R: Into<L> + Clone {
-    fn add_assign(&mut self, rhs: NdArray<R>) {
-        let (lhs, rhs) = match broadcast_array(self, &rhs) {
-            Ok((lhs, rhs)) => (lhs, rhs),
-            Err(e) => panic!("{:?}", e)
-        };
+                fn $op_fn(self, rhs: &'d NdArrayView<'b, R>) -> Self::Output {
+                    let (lhs, rhs) = match broadcast_array(self, rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
 
-        if lhs.shape() != self.shape() {
-            panic!(
-                "self shape {:?} can't broadcast when operate += operator, which is cause by rhs shape {:?}",
-                self.shape(), rhs.shape()
-            )
-        }
+                    let shape = lhs.shape.to_vec();
+                    let stride = lhs.strides.to_vec();
 
-        self.contiguous_self();
+                    let mut data: Vec<L> = Vec::with_capacity(lhs.shape.iter().product());
 
-        let iter: Vec<Vec<usize>> = self.iter_index().collect();
-        for indices in iter {
-            let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
-            self.data[self_index] += rhs.data()[rhs_index].clone().into();
-        }
-    }
+                    for (l, r) in zip(lhs.into_iter(), rhs.into_iter()) {
+                        let (l, r) = (l.clone(), r.clone());
+                        data.push(l $op r.into())
+                    }
+
+                    Self::Output::new_shape_with_strides(data.into_boxed_slice(), shape, stride)
+                }
+            }
+        )+
+    };
 }
 
-impl <'a, 'b, 'c, 'd, L, R> Add<&'d NdArrayView<'b, R>> for &'c NdArrayView<'a, L>
-where L: Add<Output=L> + Clone, R: Into<L> + Clone, 'a: 'c, 'b: 'd {
-    type Output = NdArray<L>;
-
-    fn add(self, rhs: &'d NdArrayView<'b, R>) -> Self::Output {
-        let (lhs, rhs) = match broadcast_array(self, rhs) {
-            Ok((lhs, rhs)) => (lhs, rhs),
-            Err(e) => panic!("{:?}", e)
-        };
-
-        let shape = lhs.shape.to_vec();
-        let stride = lhs.strides.to_vec();
-
-        let mut data: Vec<L> = Vec::with_capacity(lhs.shape.iter().product());
-
-        for (l, r) in zip(lhs.into_iter(), rhs.into_iter()) {
-            let (l, r) = (l.clone(), r.clone());
-            data.push(l + r.into())
-        }
-
-        Self::Output::new_shape_with_strides(data.into_boxed_slice(), shape, stride)
-    }
-}
-
-impl <'a, 'b, 'c, 'd, L, R> Sub<&'d NdArrayView<'b, R>> for &'c NdArrayView<'a, L>
-where L: Sub<Output=L> + Clone, R: Into<L> + Clone, 'a: 'c, 'b: 'd {
-    type Output = NdArray<L>;
-
-    fn sub(self, rhs: &'d NdArrayView<'b, R>) -> Self::Output {
-        let (lhs, rhs) = match broadcast_array(self, rhs) {
-            Ok((lhs, rhs)) => (lhs, rhs),
-            Err(e) => panic!("{:?}", e)
-        };
-
-        let shape = lhs.shape.to_vec();
-        let stride = lhs.strides.to_vec();
-
-        let mut data: Vec<L> = Vec::with_capacity(lhs.shape.iter().product());
-
-        for (l, r) in zip(lhs.into_iter(), rhs.into_iter()) {
-            let (l, r) = (l.clone(), r.clone());
-            data.push(l - r.into())
-        }
-
-        Self::Output::new_shape_with_strides(data.into_boxed_slice(), shape, stride)
-    }
-}
+nd_array_view_ref_op!{(+, Add, add), (-, Sub, sub), (*, Mul, mul), (/, Div, div), (%, Rem, rem)}
+nd_array_op!{(+, Add, add), (-, Sub, sub), (*, Mul, mul), (/, Div, div), (%, Rem, rem)}
+nd_array_ref_op!{(NdArrayView, NdArraySource), [(+, Add, add), (-, Sub, sub), (*, Mul, mul), (/, Div, div), (%, Rem, rem)]}
+nd_array_assign_op!{(+=, AddAssign, add_assign), (-=, SubAssign, sub_assign), (*=, MulAssign, mul_assign), (/=, DivAssign, div_assign), (%=, RemAssign, rem_assign)}
 
 impl <T, ST> Mul<Scalar<ST>> for NdArray<T>
 where T: Mul<Output=T> + Clone, ST: Into<T> + Clone {
     type Output = Self;
 
     fn mul(self, rhs: Scalar<ST>) -> Self::Output {
-        Self::new_shape_with_strides(
-            self.data.into_iter().map(|x| x * rhs.0.clone().into()).collect(),
-            self.shape,
-            self.strides,
-        )
+        self * <Scalar<T> as Into<NdArray<T>>>::into(rhs.cast())
     }
 }
 
@@ -845,11 +949,7 @@ where T: Div<Output=T> + Clone, ST: Into<T> + Clone {
     type Output = Self;
 
     fn div(self, rhs: Scalar<ST>) -> Self::Output {
-        Self::new_shape_with_strides(
-            self.data.into_iter().map(|x| x / rhs.0.clone().into()).collect(),
-            self.shape,
-            self.strides,
-        )
+        self / <Scalar<T> as Into<NdArray<T>>>::into(rhs.cast())
     }
 }
 
@@ -1050,9 +1150,23 @@ impl <T: Clone> From<Vec<T>> for NdArray<T> {
     }
 }
 
+impl <T> From<Scalar<T>> for NdArray<T> {
+    fn from(data: Scalar<T>) -> Self {
+        NdArray::new_shape_with_strides(Box::new([data.0]), vec![1], vec![1])
+    }
+}
+
 impl <T> From<T> for Scalar<T> {
     fn from(value: T) -> Self {
         Self(value)
+    }
+}
+
+impl <T> Deref for Scalar<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -1070,7 +1184,7 @@ where NT: From<T> {
 }
 
 impl <T, NT> Cast<NT> for Scalar<T>
-where NT: From<T> {
+where T: Into<NT> {
     type Target = Scalar<NT>;
 
     fn cast(self) -> Self::Target {
