@@ -109,24 +109,6 @@ impl <T> NdArrayLike<T> for &NdArray<T> {
     }
 }
 
-impl <T> NdArrayLike<T> for &mut NdArray<T> {
-    fn data<'a, 'b: 'a>(&'b self) -> &'a [T] {
-        &self.data
-    }
-    fn shape(&self) -> &[usize] {
-        &self.shape
-    }
-    fn strides(&self) -> &[usize] {
-        &self.strides
-    }
-    fn is_contiguous(&self) -> bool {
-        self.is_contiguous
-    }
-    fn to_view<'a, 'b: 'a>(&'b self) -> NdArrayView<'a, T> {
-        NdArrayView::new(NdArraySource::Owned(self), self.shape.clone(), self.strides.clone())
-    }
-}
-
 impl <'a, T> NdArrayLike<T> for NdArrayView<'a, T> {
     fn data<'b, 'c: 'b>(&'c self) -> &'b [T] {
         self.data.data()
@@ -145,8 +127,8 @@ impl <'a, T> NdArrayLike<T> for NdArrayView<'a, T> {
     }
 }
 
-impl <'a, T> NdArrayLike<T> for &NdArrayView<'a, T> {
-    fn data<'b, 'c: 'b>(&'c self) -> &'b [T] {
+impl <'a: 'b, 'b, T> NdArrayLike<T> for &'b NdArrayView<'a, T> {
+    fn data<'c ,'d: 'c>(&'d self) -> &'c [T] {
         self.data.data()
     }
     fn shape(&self) -> &[usize] {
@@ -158,7 +140,7 @@ impl <'a, T> NdArrayLike<T> for &NdArrayView<'a, T> {
     fn is_contiguous(&self) -> bool {
         self.shape == self.data.shape()
     }
-    fn to_view<'b, 'c: 'b>(&'c self) -> NdArrayView<'b, T> {
+    fn to_view<'c ,'d: 'c>(&'d self) -> NdArrayView<'c, T> {
         NdArrayView::new(NdArraySource::View(self), self.shape.clone(), self.strides.clone())
     }
 }
@@ -189,6 +171,39 @@ impl <'a, T> NdArrayLike<T> for NdArraySource<'a, T> {
         }
     }
     fn to_view<'b, 'c: 'b>(&'c self) -> NdArrayView<'b, T> {
+        match self {
+            NdArraySource::Owned(array) => array.to_view(),
+            NdArraySource::View(view) => view.to_view()
+        }
+    }
+}
+
+impl <'a: 'b, 'b, T> NdArrayLike<T> for &'b NdArraySource<'a, T> {
+    fn data<'c, 'd: 'c>(&'d self) -> &'c [T] {
+        match self {
+            NdArraySource::Owned(array) => &array.data,
+            NdArraySource::View(view) => view.data()
+        }
+    }
+    fn shape(&self) -> &[usize] {
+        match self {
+            NdArraySource::Owned(array) => &array.shape,
+            NdArraySource::View(view) => view.shape()
+        }
+    }
+    fn strides(&self) -> &[usize] {
+        match self {
+            NdArraySource::Owned(array) => &array.strides,
+            NdArraySource::View(view) => view.strides()
+        }
+    }
+    fn is_contiguous(&self) -> bool {
+        match self {
+            NdArraySource::Owned(array) => array.is_contiguous,
+            NdArraySource::View(view) => view.is_contiguous()
+        }
+    }
+    fn to_view<'c, 'd: 'c>(&'d self) -> NdArrayView<'c, T> {
         match self {
             NdArraySource::Owned(array) => array.to_view(),
             NdArraySource::View(view) => view.to_view()
@@ -600,13 +615,70 @@ where LT: NdArrayLike<L>, RT: NdArrayLike<R>, {
 
 // NdArray math op
 macro_rules! impl_nd_array_op {
-    (($($type:ty),+); $op:tt) => {
+    ($type:ident, [$(($op:tt, $op_trait:ident, $op_fn:ident)),+]) => {
+        $(impl <L, R> $op_trait<$type<R>> for $type<L>
+        where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
+            type Output = NdArray<L>;
+
+            fn $op_fn(self, rhs: $type<R>) -> Self::Output {
+                let (lhs, rhs) = match broadcast_array(&self, &rhs) {
+                    Ok((lhs, rhs)) => (lhs, rhs),
+                    Err(e) => panic!("{:?}", e)
+                };
+
+                lhs $op rhs
+            }
+        }
+        impl <L, R> $op_trait<&$type<R>> for $type<L>
+        where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
+            type Output = NdArray<L>;
+
+            fn $op_fn(self, rhs: &$type<R>) -> Self::Output {
+                let (lhs, rhs) = match broadcast_array(&self, &rhs) {
+                    Ok((lhs, rhs)) => (lhs, rhs),
+                    Err(e) => panic!("{:?}", e)
+                };
+
+                lhs $op rhs
+            }
+        }
+        impl <L, R> $op_trait<$type<R>> for &$type<L>
+        where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
+            type Output = NdArray<L>;
+
+            fn $op_fn(self, rhs: $type<R>) -> Self::Output {
+                let (lhs, rhs) = match broadcast_array(&self, &rhs) {
+                    Ok((lhs, rhs)) => (lhs, rhs),
+                    Err(e) => panic!("{:?}", e)
+                };
+
+                lhs $op rhs
+            }
+        }
+        impl <L, R> $op_trait<&$type<R>> for &$type<L>
+        where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
+            type Output = NdArray<L>;
+
+            fn $op_fn(self, rhs: &$type<R>) -> Self::Output {
+                let (lhs, rhs) = match broadcast_array(&self, &rhs) {
+                    Ok((lhs, rhs)) => (lhs, rhs),
+                    Err(e) => panic!("{:?}", e)
+                };
+
+                lhs $op rhs
+            }
+        })+
+    };
+}
+
+macro_rules! impl_nd_array_ref_op {
+    (($($type:ident),+), $op:tt, $op_trait:ident, $op_fn:ident) => {
         $(
-            impl <L, R> Add<$type<R>> for $type<L>
-            where L: Add<Output=L> + Clone, R: Into<L> + Clone {
+            impl <'a, 'b, L, R> $op_trait<$type<'b, R>> for $type<'a, L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
                 type Output = NdArray<L>;
 
-                fn add(self, rhs: NdArray<R>) -> Self::Output {
+                fn $op_fn(self, rhs: $type<'b, R>) -> Self::Output {
                     let (lhs, rhs) = match broadcast_array(&self, &rhs) {
                         Ok((lhs, rhs)) => (lhs, rhs),
                         Err(e) => panic!("{:?}", e)
@@ -615,11 +687,12 @@ macro_rules! impl_nd_array_op {
                     lhs $op rhs
                 }
             }
-            impl <L, R> Add<&$type<R>> for $type<L>
-            where L: Add<Output=L> + Clone, R: Into<L> + Clone {
+
+            impl <'a, 'b, 'c, L, R> $op_trait<&'c $type<'b, R>> for $type<'a, L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone, 'b: 'c {
                 type Output = NdArray<L>;
 
-                fn add(self, rhs: NdArray<R>) -> Self::Output {
+                fn $op_fn(self, rhs: &'c $type<'b, R>) -> Self::Output {
                     let (lhs, rhs) = match broadcast_array(&self, &rhs) {
                         Ok((lhs, rhs)) => (lhs, rhs),
                         Err(e) => panic!("{:?}", e)
@@ -628,24 +701,12 @@ macro_rules! impl_nd_array_op {
                     lhs $op rhs
                 }
             }
-            impl <L, R> Add<$type<R>> for &$type<L>
-            where L: Add<Output=L> + Clone, R: Into<L> + Clone {
+
+            impl <'a, 'b, 'c, L, R> $op_trait<$type<'b, R>> for &'c $type<'a, L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone, 'a: 'c {
                 type Output = NdArray<L>;
 
-                fn add(self, rhs: NdArray<R>) -> Self::Output {
-                    let (lhs, rhs) = match broadcast_array(&self, &rhs) {
-                        Ok((lhs, rhs)) => (lhs, rhs),
-                        Err(e) => panic!("{:?}", e)
-                    };
-
-                    lhs $op rhs
-                }
-            }
-            impl <L, R> Add<&$type<R>> for &$type<L>
-            where L: Add<Output=L> + Clone, R: Into<L> + Clone {
-                type Output = NdArray<L>;
-
-                fn add(self, rhs: NdArray<R>) -> Self::Output {
+                fn $op_fn(self, rhs: $type<'b, R>) -> Self::Output {
                     let (lhs, rhs) = match broadcast_array(&self, &rhs) {
                         Ok((lhs, rhs)) => (lhs, rhs),
                         Err(e) => panic!("{:?}", e)
@@ -658,61 +719,10 @@ macro_rules! impl_nd_array_op {
     };
 }
 
-impl <L, R> Add<NdArray<R>> for NdArray<L>
-where L: Add<Output=L> + Clone, R: Into<L> + Clone {
-    type Output = NdArray<L>;
-
-    fn add(self, rhs: NdArray<R>) -> Self::Output {
-        let (lhs, rhs) = match broadcast_array(&self, &rhs) {
-            Ok((lhs, rhs)) => (lhs, rhs),
-            Err(e) => panic!("{:?}", e)
-        };
-
-        lhs + rhs
-    }
-}
-
-impl <L, R> Add<&NdArray<R>> for NdArray<L>
-where L: Add<Output=L> + Clone, R: Into<L> + Clone {
-    type Output = NdArray<L>;
-
-    fn add(self, rhs: &NdArray<R>) -> Self::Output {
-        let (lhs, rhs) = match broadcast_array(&self, rhs) {
-            Ok((lhs, rhs)) => (lhs, rhs),
-            Err(e) => panic!("{:?}", e)
-        };
-
-        lhs + rhs
-    }
-}
-
-impl <L, R> Add<NdArray<R>> for &NdArray<L>
-where L: Add<Output=L> + Clone, R: Into<L> + Clone {
-    type Output = NdArray<L>;
-
-    fn add(self, rhs: NdArray<R>) -> Self::Output {
-        let (lhs, rhs) = match broadcast_array(self, &rhs) {
-            Ok((lhs, rhs)) => (lhs, rhs),
-            Err(e) => panic!("{:?}", e)
-        };
-
-        lhs + rhs
-    }
-}
-
-impl <L, R> Add<&NdArray<R>> for &NdArray<L>
-where L: Add<Output=L> + Clone, R: Into<L> + Clone {
-    type Output = NdArray<L>;
-
-    fn add(self, rhs: &NdArray<R>) -> Self::Output {
-        let (lhs, rhs) = match broadcast_array(self, rhs) {
-            Ok((lhs, rhs)) => (lhs, rhs),
-            Err(e) => panic!("{:?}", e)
-        };
-
-        lhs + rhs
-    }
-}
+impl_nd_array_op!{NdArray, [(+, Add, add), (-, Sub, sub)]}
+impl_nd_array_ref_op!{(NdArrayView, NdArraySource), +, Add, add}
+impl_nd_array_ref_op!{(NdArrayView, NdArraySource), -, Sub, sub}
+// impl_nd_array_op!{NdArray, -, Sub, sub}
 
 /// ```
 /// use mnist_inference::*;
@@ -745,26 +755,12 @@ where L: AddAssign + Clone, R: Into<L> + Clone {
     }
 }
 
-impl <'a, 'b, L, R> Add<&NdArrayView<'b, R>> for &NdArrayView<'a, L>
-where L: Add<Output=L> + Clone, R: Into<L> + Clone {
+impl <'a, 'b, 'c, 'd, L, R> Add<&'d NdArrayView<'b, R>> for &'c NdArrayView<'a, L>
+where L: Add<Output=L> + Clone, R: Into<L> + Clone, 'a: 'c, 'b: 'd {
     type Output = NdArray<L>;
 
-    fn add(self, rhs: &NdArrayView<'b, R>) -> Self::Output {
+    fn add(self, rhs: &'d NdArrayView<'b, R>) -> Self::Output {
         let (lhs, rhs) = match broadcast_array(self, rhs) {
-            Ok((lhs, rhs)) => (lhs, rhs),
-            Err(e) => panic!("{:?}", e)
-        };
-
-        lhs + rhs
-    }
-}
-
-impl <'a, 'b, L, R> Add<NdArrayView<'b, R>> for NdArrayView<'a, L>
-where L: Add<Output=L> + Clone, R: Into<L> + Clone {
-    type Output = NdArray<L>;
-
-    fn add(self, rhs: NdArrayView<'b, R>) -> Self::Output {
-        let (lhs, rhs) = match broadcast_array(&self, &rhs) {
             Ok((lhs, rhs)) => (lhs, rhs),
             Err(e) => panic!("{:?}", e)
         };
@@ -777,6 +773,30 @@ where L: Add<Output=L> + Clone, R: Into<L> + Clone {
         for (l, r) in zip(lhs.into_iter(), rhs.into_iter()) {
             let (l, r) = (l.clone(), r.clone());
             data.push(l + r.into())
+        }
+
+        Self::Output::new_shape_with_strides(data.into_boxed_slice(), shape, stride)
+    }
+}
+
+impl <'a, 'b, 'c, 'd, L, R> Sub<&'d NdArrayView<'b, R>> for &'c NdArrayView<'a, L>
+where L: Sub<Output=L> + Clone, R: Into<L> + Clone, 'a: 'c, 'b: 'd {
+    type Output = NdArray<L>;
+
+    fn sub(self, rhs: &'d NdArrayView<'b, R>) -> Self::Output {
+        let (lhs, rhs) = match broadcast_array(self, rhs) {
+            Ok((lhs, rhs)) => (lhs, rhs),
+            Err(e) => panic!("{:?}", e)
+        };
+
+        let shape = lhs.shape.to_vec();
+        let stride = lhs.strides.to_vec();
+
+        let mut data: Vec<L> = Vec::with_capacity(lhs.shape.iter().product());
+
+        for (l, r) in zip(lhs.into_iter(), rhs.into_iter()) {
+            let (l, r) = (l.clone(), r.clone());
+            data.push(l - r.into())
         }
 
         Self::Output::new_shape_with_strides(data.into_boxed_slice(), shape, stride)
