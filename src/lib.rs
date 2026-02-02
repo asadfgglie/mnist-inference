@@ -1200,6 +1200,7 @@ macro_rules! general_eco_op_scalar {
     };
 }
 
+/// base on vector space axiom and language meanings, we only implement `*`, `/`, and `%`
 macro_rules! assign_scalar_op {
     ($( ($op:tt, $op_trait:ident, $op_fn:ident) ),+) => {
         $(
