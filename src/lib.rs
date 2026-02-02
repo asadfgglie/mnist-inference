@@ -1046,51 +1046,70 @@ macro_rules! nd_array_with_commutative_op_scalar {
             }
         }
     };
+    ([ $( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+ ]) => {
+        $(
+            nd_array_with_commutative_op_scalar!{$op, $op_trait, $op_fn}
+        )+
+    };
 }
 
 macro_rules! nd_array_ref_with_non_commutative_op_scalar {
-    ($type:ident, $op:tt, $op_trait:ident, $op_fn:ident) => {
-        impl <'a, T, ST> $op_trait<Scalar<ST>> for $type<'a, T>
-        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
-            type Output = NdArray<T>;
+    (( $( $type:ident ),+ ), $ops:tt) => {
+        nd_array_with_commutative_op_scalar!{$ops}
+        $(
+            nd_array_ref_with_non_commutative_op_scalar!{$type, $ops}
+        )+
+    };
+    ($type:ident, [ $( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+ ]) => {
+        $(
+            impl <'a, T, ST> $op_trait<Scalar<ST>> for $type<'a, T>
+            where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+                type Output = NdArray<T>;
 
-            fn $op_fn(self, rhs: Scalar<ST>) -> Self::Output {
-                &self $op &rhs
+                fn $op_fn(self, rhs: Scalar<ST>) -> Self::Output {
+                    &self $op &rhs
+                }
             }
-        }
 
-        impl <'a, T, ST> $op_trait<&Scalar<ST>> for $type<'a, T>
-        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
-            type Output = NdArray<T>;
+            impl <'a, T, ST> $op_trait<&Scalar<ST>> for $type<'a, T>
+            where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+                type Output = NdArray<T>;
 
-            fn $op_fn(self, rhs: &Scalar<ST>) -> Self::Output {
-                &self $op rhs
+                fn $op_fn(self, rhs: &Scalar<ST>) -> Self::Output {
+                    &self $op rhs
+                }
             }
-        }
 
-        impl <'a, T, ST> $op_trait<Scalar<ST>> for &$type<'a, T>
-        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
-            type Output = NdArray<T>;
+            impl <'a, T, ST> $op_trait<Scalar<ST>> for &$type<'a, T>
+            where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+                type Output = NdArray<T>;
 
-            fn $op_fn(self, rhs: Scalar<ST>) -> Self::Output {
-                self $op &rhs
+                fn $op_fn(self, rhs: Scalar<ST>) -> Self::Output {
+                    self $op &rhs
+                }
             }
-        }
 
-        impl <'a, T, ST> $op_trait<&Scalar<ST>> for &$type<'a, T>
-        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
-            type Output = NdArray<T>;
+            impl <'a, T, ST> $op_trait<&Scalar<ST>> for &$type<'a, T>
+            where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+                type Output = NdArray<T>;
 
-            fn $op_fn(self, rhs: &Scalar<ST>) -> Self::Output {
-                self $op <Scalar<ST> as Into<NdArray<ST>>>::into(Scalar(rhs.0.clone()))
+                fn $op_fn(self, rhs: &Scalar<ST>) -> Self::Output {
+                    self $op <Scalar<ST> as Into<NdArray<ST>>>::into(Scalar(rhs.0.clone()))
+                }
             }
-        }
+        )+
     };
 }
 
 macro_rules! nd_array_ref_with_commutative_op_scalar {
-    ($type:ident, $op:tt, $op_trait:ident, $op_fn:ident) => {
-        nd_array_ref_with_non_commutative_op_scalar!{$type, $op, $op_trait, $op_fn}
+    (( $( $type:ident ),+ ), $ops:tt) => {
+        nd_array_with_commutative_op_scalar!{$ops}
+        $(
+            nd_array_ref_with_commutative_op_scalar!{$type, $ops}
+        )+
+    };
+    ($type:ident, [($op:tt, $op_trait:ident, $op_fn:ident)]) => {
+        nd_array_ref_with_non_commutative_op_scalar!{$type, [($op, $op_trait, $op_fn)]}
 
         impl <'a, T, ST> $op_trait<$type<'a, T>> for Scalar<ST>
         where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
@@ -1132,9 +1151,8 @@ macro_rules! nd_array_ref_with_commutative_op_scalar {
 
 nd_array_general_op!{(+, Add, add), (-, Sub, sub), (*, Mul, mul), (/, Div, div), (%, Rem, rem)}
 nd_array_assign_op!{(+=, AddAssign, add_assign), (-=, SubAssign, sub_assign), (*=, MulAssign, mul_assign), (/=, DivAssign, div_assign), (%=, RemAssign, rem_assign)}
-nd_array_with_non_commutative_op_scalar!{(%, Rem, rem), (/, Div, div)}
-nd_array_with_commutative_op_scalar!{*, Mul, mul}
-// nd_array_ref_with_non_commutative_op_scalar!{NdArrayView, *, Mul, mul}
+nd_array_ref_with_non_commutative_op_scalar!{(NdArrayView, NdArraySource), [(%, Rem, rem), (/, Div, div)]}
+nd_array_ref_with_commutative_op_scalar!{(NdArrayView, NdArraySource), [(*, Mul, mul)]}
 
 impl <T, ST> MulAssign<Scalar<ST>> for NdArray<T>
 where T: MulAssign, ST: Into<T> + Clone {
