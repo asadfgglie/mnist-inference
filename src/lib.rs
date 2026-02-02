@@ -788,7 +788,12 @@ macro_rules! nd_array_assign_op {
     };
 }
 
-macro_rules! nd_array_ref_op_helper {
+macro_rules! nd_array_ref_op {
+    ( ( $( $type:ident ),+ ), $ops:tt ) => {
+        $(
+            nd_array_ref_op!{$type, $ops}
+        )+
+    };
     ($type:ident, [ $( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+ ]) => {
         $(
             impl <'a, 'b, L, R> $op_trait<$type<'b, R>> for $type<'a, L>
@@ -836,14 +841,6 @@ macro_rules! nd_array_ref_op_helper {
     };
 }
 
-macro_rules! nd_array_ref_op {
-    ( ( $( $type:ident ),+ ), $ops:tt ) => {
-        $(
-            nd_array_ref_op_helper!{$type, $ops}
-        )+
-    };
-}
-
 macro_rules! nd_array_view_ref_op {
     ($( ($op:tt, $op_trait:ident, $op_fn:ident) ),+) => {
         $(
@@ -882,64 +879,186 @@ macro_rules! nd_array_general_op {
     };
 }
 
-macro_rules! nd_array_with_non_commucative_op_scalar_helper {
-    ($type:ident, [ $( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+ ]) => {
+macro_rules! nd_array_with_non_commutative_op_scalar {
+    ($( ($op:tt, $op_trait:ident, $op_fn:ident) ),+) => {
         $(
-
+            nd_array_with_non_commutative_op_scalar!{$op, $op_trait, $op_fn}
         )+
+    };
+    ($op:tt, $op_trait:ident, $op_fn:ident) => {
+        impl <T, ST> $op_trait<Scalar<ST>> for NdArray<T>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: Scalar<ST>) -> Self::Output {
+                &self $op &rhs
+            }
+        }
+
+        impl <T, ST> $op_trait<&Scalar<ST>> for NdArray<T>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: &Scalar<ST>) -> Self::Output {
+                &self $op rhs
+            }
+        }
+
+        impl <T, ST> $op_trait<Scalar<ST>> for &NdArray<T>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: Scalar<ST>) -> Self::Output {
+                self $op &rhs
+            }
+        }
+
+        impl <T, ST> $op_trait<&Scalar<ST>> for &NdArray<T>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: &Scalar<ST>) -> Self::Output {
+                self $op <Scalar<ST> as Into<NdArray<ST>>>::into(Scalar(rhs.0.clone()))
+            }
+        }
     };
 }
 
-macro_rules! nd_array_with_non_commucative_op_scalar {
-    ( ( $( $type:ident ),+ ), $ops:tt ) => {
-        $(
-            nd_array_with_non_commucative_op_scalar_helper!{$type, $ops}
-        )+
+macro_rules! nd_array_with_commutative_op_scalar {
+    ($op:tt, $op_trait:ident, $op_fn:ident) => {
+        nd_array_with_non_commutative_op_scalar!{$op, $op_trait, $op_fn}
+
+        impl <T, ST> $op_trait<NdArray<T>> for Scalar<ST>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: NdArray<T>) -> Self::Output {
+                &rhs $op &self
+            }
+        }
+
+        impl <T, ST> $op_trait<NdArray<T>> for &Scalar<ST>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: NdArray<T>) -> Self::Output {
+                &rhs $op self
+            }
+        }
+
+        impl <T, ST> $op_trait<&NdArray<T>> for Scalar<ST>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: &NdArray<T>) -> Self::Output {
+                rhs $op &self
+            }
+        }
+
+        impl <T, ST> $op_trait<&NdArray<T>> for &Scalar<ST>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: &NdArray<T>) -> Self::Output {
+                rhs $op <Scalar<ST> as Into<NdArray<ST>>>::into(Scalar(self.0.clone()))
+            }
+        }
     };
 }
 
-macro_rules! nd_array_with_commucative_op_scalar_helper {
-    ($type:ident, [ $( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+ ]) => {
-        $(
-            nd_array_with_non_commucative_op_scalar_helper!{$type, [ $( ( $op, $op_trait, $op_fn ) ),+ ]}
-        )+
+macro_rules! nd_array_ref_with_non_commutative_op_scalar {
+    ($type:ident, $op:tt, $op_trait:ident, $op_fn:ident) => {
+        impl <'a, T, ST> $op_trait<Scalar<ST>> for $type<'a, T>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: Scalar<ST>) -> Self::Output {
+                &self $op &rhs
+            }
+        }
+
+        impl <'a, T, ST> $op_trait<&Scalar<ST>> for $type<'a, T>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: &Scalar<ST>) -> Self::Output {
+                &self $op rhs
+            }
+        }
+
+        impl <'a, T, ST> $op_trait<Scalar<ST>> for &$type<'a, T>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: Scalar<ST>) -> Self::Output {
+                self $op &rhs
+            }
+        }
+
+        impl <'a, T, ST> $op_trait<&Scalar<ST>> for &$type<'a, T>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: &Scalar<ST>) -> Self::Output {
+                self $op <Scalar<ST> as Into<NdArray<ST>>>::into(Scalar(rhs.0.clone()))
+            }
+        }
     };
 }
 
-macro_rules! nd_array_with_commucative_op_scalar {
-    ( ( $( $type:ident ),+ ), $ops:tt ) => {
-        $(
-            nd_array_with_non_commucative_op_scalar_helper!{$type, $ops}
-        )+
+macro_rules! nd_array_ref_with_commutative_op_scalar {
+    ($type:ident, $op:tt, $op_trait:ident, $op_fn:ident) => {
+        nd_array_ref_with_non_commutative_op_scalar!{$type, $op, $op_trait, $op_fn}
+
+        impl <'a, T, ST> $op_trait<$type<'a, T>> for Scalar<ST>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: $type<'a, T>) -> Self::Output {
+                &rhs $op &self
+            }
+        }
+
+        impl <'a, T, ST> $op_trait<$type<'a, T>> for &Scalar<ST>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: $type<'a, T>) -> Self::Output {
+                &rhs $op self
+            }
+        }
+
+        impl <'a, T, ST> $op_trait<&$type<'a, T>> for Scalar<ST>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: &$type<'a, T>) -> Self::Output {
+                rhs $op &self
+            }
+        }
+
+        impl <'a, T, ST> $op_trait<&$type<'a, T>> for &Scalar<ST>
+        where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
+            type Output = NdArray<T>;
+
+            fn $op_fn(self, rhs: &$type<'a, T>) -> Self::Output {
+                rhs $op <Scalar<ST> as Into<NdArray<ST>>>::into(Scalar(self.0.clone()))
+            }
+        }
     };
 }
 
 nd_array_general_op!{(+, Add, add), (-, Sub, sub), (*, Mul, mul), (/, Div, div), (%, Rem, rem)}
 nd_array_assign_op!{(+=, AddAssign, add_assign), (-=, SubAssign, sub_assign), (*=, MulAssign, mul_assign), (/=, DivAssign, div_assign), (%=, RemAssign, rem_assign)}
-
-impl <T, ST> Mul<Scalar<ST>> for NdArray<T>
-where T: Mul<Output=T> + Clone, ST: Into<T> + Clone {
-    type Output = Self;
-
-    fn mul(self, rhs: Scalar<ST>) -> Self::Output {
-        self * <Scalar<T> as Into<NdArray<T>>>::into(rhs.cast())
-    }
-}
+nd_array_with_non_commutative_op_scalar!{(%, Rem, rem), (/, Div, div)}
+nd_array_with_commutative_op_scalar!{*, Mul, mul}
+nd_array_ref_with_non_commutative_op_scalar!{NdArrayView, *, Mul, mul}
 
 impl <T, ST> MulAssign<Scalar<ST>> for NdArray<T>
 where T: MulAssign, ST: Into<T> + Clone {
     fn mul_assign(&mut self, rhs: Scalar<ST>) {
         self.data.iter_mut()
             .for_each(|x| *x *= rhs.0.clone().into());
-    }
-}
-
-impl <T, ST> Div<Scalar<ST>> for NdArray<T>
-where T: Div<Output=T> + Clone, ST: Into<T> + Clone {
-    type Output = Self;
-
-    fn div(self, rhs: Scalar<ST>) -> Self::Output {
-        self / <Scalar<T> as Into<NdArray<T>>>::into(rhs.cast())
     }
 }
 
