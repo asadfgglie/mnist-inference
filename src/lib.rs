@@ -174,7 +174,7 @@ impl <T> NdArray<T> {
         )).into()
     }
 
-    pub fn multal<R>(&self, rhs: & impl NdArrayLike<R>) -> Self {
+    pub fn matmul<R>(&self, rhs: & impl NdArrayLike<R>) -> Self {
         let (lhs, rhs) = match broadcast_array(self, rhs) {
             Ok((lhs, rhs)) => (lhs, rhs),
             Err(e) => panic!("{:?}", e)
