@@ -7,7 +7,6 @@ pub struct NdArray<T> {
     data: Box<[T]>,
     shape: Vec<usize>,
     strides: Vec<usize>,
-    is_contiguous: bool
 }
 
 pub struct NdArrayView<'a, T> {
@@ -49,7 +48,9 @@ pub trait NdArrayLike<T> {
     fn data<'a, 'b: 'a>(&'b self) -> &'a [T];
     fn shape(&self) -> &[usize];
     fn strides(&self) -> &[usize];
-    fn is_contiguous(&self) -> bool;
+    fn is_contiguous(&self) -> bool {
+        self.strides() == compute_stride(self.shape())
+    }
     fn compute_index(&self, indices: &[usize]) -> usize {
         let index = compute_index(indices, self.strides());
         match self.data().get(index) {
@@ -79,9 +80,6 @@ impl <T> NdArrayLike<T> for NdArray<T> {
     fn strides(&self) -> &[usize] {
         &self.strides
     }
-    fn is_contiguous(&self) -> bool {
-        self.is_contiguous
-    }
 }
 
 impl <T> NdArrayLike<T> for &NdArray<T> {
@@ -93,9 +91,6 @@ impl <T> NdArrayLike<T> for &NdArray<T> {
     }
     fn strides(&self) -> &[usize] {
         &self.strides
-    }
-    fn is_contiguous(&self) -> bool {
-        self.is_contiguous
     }
 }
 
@@ -109,9 +104,6 @@ impl <'a, T> NdArrayLike<T> for NdArrayView<'a, T> {
     fn strides(&self) -> &[usize] {
         &self.strides
     }
-    fn is_contiguous(&self) -> bool {
-        todo!()
-    }
 }
 
 impl <'a: 'b, 'b, T> NdArrayLike<T> for &'b NdArrayView<'a, T> {
@@ -123,9 +115,6 @@ impl <'a: 'b, 'b, T> NdArrayLike<T> for &'b NdArrayView<'a, T> {
     }
     fn strides(&self) -> &[usize] {
         &self.strides
-    }
-    fn is_contiguous(&self) -> bool {
-        todo!()
     }
 }
 
@@ -141,14 +130,12 @@ impl <T> NdArray<T> {
                 data,
                 shape,
                 strides,
-                is_contiguous: true
             },
             Err(_) => match validate_view(&shape, &shape, &strides) {
                 Ok(_) => Self {
                     data,
                     shape,
                     strides,
-                    is_contiguous: false
                 },
                 Err(e) => panic!("{:?}", e)
             }
@@ -202,7 +189,7 @@ impl <T> NdArray<T> {
 
 impl <T: Clone> NdArray<T> {
     pub fn contiguous(self) -> Self {
-        if self.is_contiguous {
+        if self.is_contiguous() {
             self
         } else {
             let mut data: Vec<T> = Vec::with_capacity(self.shape.iter().product());
@@ -214,13 +201,13 @@ impl <T: Clone> NdArray<T> {
     }
 
     pub fn contiguous_self(& mut self) {
-        if !self.is_contiguous {
+        if !self.is_contiguous() {
             let mut data: Vec<T> = Vec::with_capacity(self.shape.iter().product());
 
             self.into_iter()
                 .for_each(|x| data.push(x.clone()));
             self.data = data.into_boxed_slice();
-            self.is_contiguous = true;
+            self.strides = compute_stride(&self.shape);
         }
     }
 }
@@ -245,7 +232,7 @@ impl <'a, T> NdArrayView<'a, T> {
 }
 
 impl <'a, T> NdArrayIterator<'a, T> {
-    pub fn new<'b: 'a>(array: &'b dyn NdArrayLike<T>) -> Self {
+    pub fn new<'b: 'a>(array: &'b impl NdArrayLike<T>) -> Self {
         Self {
             data: array,
             index_iter: NdArrayDataIndexIterator::new(array),
@@ -254,7 +241,7 @@ impl <'a, T> NdArrayIterator<'a, T> {
 }
 
 impl <'a> NdArrayDataIndexIterator<'a> {
-    pub fn new<'b: 'a, T>(array: &'b dyn NdArrayLike<T>) -> Self {
+    pub fn new<'b: 'a, T>(array: &'b impl NdArrayLike<T>) -> Self {
         let rank = array.shape().len();
 
         Self {
