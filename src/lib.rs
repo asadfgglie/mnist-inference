@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::iter::zip;
+use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign, Deref, DerefMut};
 
 #[derive(Debug, PartialEq)]
@@ -15,9 +16,10 @@ pub struct NdArrayView<'a, T> {
     strides: Vec<usize>,
 }
 
-pub struct NdArrayIterator<'a, T> {
-    data: &'a dyn NdArrayLike<T>,
+pub struct NdArrayIterator<'a, T: NdArrayLike<DT>, DT> {
+    data: &'a T,
     index_iter: NdArrayDataIndexIterator<'a>,
+    _marker: PhantomData<DT>,
 }
 
 // Iter index by NdArray shape and stride
@@ -231,11 +233,12 @@ impl <'a, T> NdArrayView<'a, T> {
     }
 }
 
-impl <'a, T> NdArrayIterator<'a, T> {
-    pub fn new<'b: 'a>(array: &'b impl NdArrayLike<T>) -> Self {
+impl <'a, T: NdArrayLike<DT>, DT> NdArrayIterator<'a, T, DT> {
+    pub fn new<'b: 'a>(array: &'b T) -> Self {
         Self {
             data: array,
             index_iter: NdArrayDataIndexIterator::new(array),
+            _marker: PhantomData,
         }
     }
 }
@@ -1234,8 +1237,8 @@ where T: Add<Output=T>, Idx: Into<Vec<usize>>{
 
 
 // Iterators
-impl <'a, T> Iterator for NdArrayIterator<'a, T> {
-    type Item = &'a T;
+impl <'a, T: NdArrayLike<DT>, DT: 'a> Iterator for NdArrayIterator<'a, T, DT> {
+    type Item = &'a DT;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.index_iter.next() {
@@ -1308,7 +1311,7 @@ macro_rules! impl_nd_array_iter {
         $(
             impl <'a: 'b, 'b, T> IntoIterator for &'b $type {
                 type Item = &'b T;
-                type IntoIter = NdArrayIterator<'b, T>;
+                type IntoIter = NdArrayIterator<'b, $type, T>;
 
                 fn into_iter(self) -> Self::IntoIter {
                     NdArrayIterator::new(self)
