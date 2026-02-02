@@ -824,6 +824,88 @@ macro_rules! nd_array_ref_op {
                 }
             }
 
+            impl <'a, 'b, L, R> $op_trait<$type<'b, R>> for NdArray<L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
+                type Output = NdArray<L>;
+
+                fn $op_fn(self, rhs: $type<'b, R>) -> Self::Output {
+                    &self $op &rhs
+                }
+            }
+
+            impl <'a, 'b, 'c, L, R> $op_trait<&'c $type<'b, R>> for NdArray<L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone, 'b: 'c {
+                type Output = NdArray<L>;
+
+                fn $op_fn(self, rhs: &'c $type<'b, R>) -> Self::Output {
+                    &self $op rhs
+                }
+            }
+
+            impl <'a, 'b, L, R> $op_trait<$type<'b, R>> for &NdArray<L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
+                type Output = NdArray<L>;
+
+                fn $op_fn(self, rhs: $type<'b, R>) -> Self::Output {
+                    self $op &rhs
+                }
+            }
+
+            impl <'a, 'b, 'c, L, R> $op_trait<&'c $type<'b, R>> for &NdArray<L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone, 'b: 'c {
+                type Output = NdArray<L>;
+
+                fn $op_fn(self, rhs: &'c $type<'b, R>) -> Self::Output {
+                    let (lhs, rhs) = match broadcast_array(self, rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
+
+                    &lhs $op &rhs
+                }
+            }
+
+            impl <'a, 'b, L, R> $op_trait<NdArray<R>> for $type<'b, L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
+                type Output = NdArray<L>;
+
+                fn $op_fn(self, rhs: NdArray<R>) -> Self::Output {
+                    &self $op &rhs
+                }
+            }
+
+            impl <'a, 'b, 'c, L, R> $op_trait<NdArray<R>> for &'c $type<'b, L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone, 'b: 'c {
+                type Output = NdArray<L>;
+
+                fn $op_fn(self, rhs: NdArray<R>) -> Self::Output {
+                    self $op &rhs
+                }
+            }
+
+            impl <'a, 'b, L, R> $op_trait<&NdArray<R>> for $type<'b, L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone {
+                type Output = NdArray<L>;
+
+                fn $op_fn(self, rhs: &NdArray<R>) -> Self::Output {
+                    &self $op rhs
+                }
+            }
+
+            impl <'a, 'b, 'c, L, R> $op_trait<&NdArray<R>> for &'c $type<'b, L>
+            where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone, 'b: 'c {
+                type Output = NdArray<L>;
+
+                fn $op_fn(self, rhs: &NdArray<R>) -> Self::Output {
+                    let (lhs, rhs) = match broadcast_array(self, rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
+
+                    lhs $op rhs
+                }
+            }
+
             impl <'a, 'b, 'c, L, R> $op_trait<$type<'b, R>> for &'c $type<'a, L>
             where L: $op_trait<Output=L> + Clone, R: Into<L> + Clone, 'a: 'c {
                 type Output = NdArray<L>;
@@ -1052,7 +1134,7 @@ nd_array_general_op!{(+, Add, add), (-, Sub, sub), (*, Mul, mul), (/, Div, div),
 nd_array_assign_op!{(+=, AddAssign, add_assign), (-=, SubAssign, sub_assign), (*=, MulAssign, mul_assign), (/=, DivAssign, div_assign), (%=, RemAssign, rem_assign)}
 nd_array_with_non_commutative_op_scalar!{(%, Rem, rem), (/, Div, div)}
 nd_array_with_commutative_op_scalar!{*, Mul, mul}
-nd_array_ref_with_non_commutative_op_scalar!{NdArrayView, *, Mul, mul}
+// nd_array_ref_with_non_commutative_op_scalar!{NdArrayView, *, Mul, mul}
 
 impl <T, ST> MulAssign<Scalar<ST>> for NdArray<T>
 where T: MulAssign, ST: Into<T> + Clone {
