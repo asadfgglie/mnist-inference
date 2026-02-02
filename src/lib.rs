@@ -266,6 +266,20 @@ impl <T> NdArray<T> {
             "self.data seems empty, but this should not happen. {}", self_info
         )).into()
     }
+
+    pub fn multal<R>(&self, rhs: & impl NdArrayLike<R>) -> Self {
+        let (lhs, rhs) = match broadcast_array(self, rhs) {
+            Ok((lhs, rhs)) => (lhs, rhs),
+            Err(e) => panic!("{:?}", e)
+        };
+
+        let lhs_batch_shape = &lhs.strides()[0..lhs.strides().len()];
+        let rhs_batch_shape = &rhs.strides()[0..rhs.strides().len()];
+
+        let lhs_batch_stride = compute_stride(lhs_batch_shape);
+        let rhs_batch_stride = compute_stride(rhs_batch_shape);
+        todo!()
+    }
 }
 
 impl <T: Clone> NdArray<T> {
@@ -406,30 +420,17 @@ fn validate_view(old_shape: &[usize], view_shape: &[usize], view_stride: &[usize
 }
 
 fn validate_contiguous_stride(shape: &[usize], strides: &[usize]) -> Result<(), NdArrayError> {
-    if shape.len() != strides.len() {
-        Err(NdArrayError::InvalidStridesError(format!(
-            "Shape length ({}) does not match strides length ({})", shape.len(), strides.len()
-        )))
-    } else {
-        for (index, stride) in strides.iter().enumerate() {
-            if index == shape.len() - 1 {
-                if *stride != 1 {
-                    return Err(NdArrayError::InvalidStridesError(format!(
-                        "strides[{index}] except 1, but got {stride}, strides: {strides:?}, shape: {shape:?}"
-                    )))
-                }
-            }
-            let except_stride = shape[(index + 1)..shape.len()].iter().product::<usize>();
-            if *stride != except_stride {
-                return Err(NdArrayError::InvalidStridesError(format!(
-                    "strides[{index}] except {except_stride}, but got {stride}, strides: {strides:?}, shape: {shape:?}"
-                )))
-            }
-        }
+    let contiguous_stride = compute_stride(shape);
+    if strides == contiguous_stride {
         Ok(())
+    } else {
+        Err(NdArrayError::InvalidStridesError(
+            format!("Except stride {:?}, got {:?}", contiguous_stride, strides)
+        ))
     }
 }
 
+/// base on shape, return row-major contiguous stride
 fn compute_stride(shape: &[usize]) -> Vec<usize> {
     shape.into_iter()
         .rev()
@@ -567,16 +568,14 @@ pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<Vec<usize>, NdAr
 /// - Strides for broadcasted dimensions are set to `0` to ensure proper indexing behavior.
 /// - The function clones the computed broadcast shape to ensure immutability and avoid accidental
 ///   modifications during stride computation.
-pub fn broadcast_array<'a, 'b, L, R, LT, RT>(lhs: &'a LT, rhs: &'b RT)
-    -> Result<(NdArrayView<'a, L>, NdArrayView<'b, R>), NdArrayError>
-where LT: NdArrayLike<L>, RT: NdArrayLike<R>, {
+pub fn broadcast_array<'a, 'b, 'c: 'a, 'd: 'b, L, R>(lhs: &'c impl NdArrayLike<L>, rhs: &'d impl NdArrayLike<R>)
+    -> Result<(NdArrayView<'a, L>, NdArrayView<'b, R>), NdArrayError> {
     match broadcast_shapes(&lhs.shape(), &rhs.shape()) {
         Ok(batch_shape) => {
             let rhs_shape = batch_shape.clone();
             let lhs_shape = batch_shape;
 
-            fn compute_strides<T, DT>(old_array: &T, broadcast_shape: &[usize]) -> Vec<usize>
-            where T: NdArrayLike<DT>, {
+            fn compute_strides<T>(old_array: &impl NdArrayLike<T>, broadcast_shape: &[usize]) -> Vec<usize> {
                 let mut strides: Vec<usize> = Vec::with_capacity(broadcast_shape.len());
 
                 let mut old_shape_iter = old_array.shape().iter().rev();
@@ -617,11 +616,11 @@ where LT: NdArrayLike<L>, RT: NdArrayLike<R>, {
                 strides
             }
 
-            let rhs_strides = compute_strides(lhs, &rhs_shape);
-            let lhs_strides = compute_strides(rhs, &lhs_shape);
+            let lhs_strides = compute_strides(lhs, &lhs_shape);
+            let rhs_strides = compute_strides(rhs, &rhs_shape);
 
-            Ok((NdArrayView::new(NdArraySource::View(lhs), rhs_shape, rhs_strides),
-                NdArrayView::new(NdArraySource::View(rhs), lhs_shape, lhs_strides)))
+            Ok((NdArrayView::new(NdArraySource::View(lhs), lhs_shape, lhs_strides),
+                NdArrayView::new(NdArraySource::View(rhs), rhs_shape, rhs_strides)))
         },
         Err(e) => Err(e)
     }
