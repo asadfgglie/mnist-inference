@@ -10,14 +10,8 @@ pub struct NdArray<T> {
     is_contiguous: bool
 }
 
-#[derive(Clone, Copy)]
-pub enum NdArraySource<'a, T> {
-    Owned(&'a NdArray<T>),
-    View(&'a dyn NdArrayLike<T>)
-}
-
 pub struct NdArrayView<'a, T> {
-    data: NdArraySource<'a, T>,
+    data: &'a [T],
     shape: Vec<usize>,
     strides: Vec<usize>,
 }
@@ -66,7 +60,9 @@ pub trait NdArrayLike<T> {
         };
         index
     }
-    fn to_view<'a, 'b: 'a>(&'b self) -> NdArrayView<'a, T>;
+    fn to_view<'a, 'b: 'a>(&'b self) -> NdArrayView<'a, T> {
+        NdArrayView::new(self.data(), self.shape(), self.shape().to_vec(), self.strides().to_vec())
+    }
     fn iter_index<'a>(&'a self) -> NdArrayDataIndexIterator<'a>
     where Self: Sized, T: 'a {
         NdArrayDataIndexIterator::new(self)
@@ -86,9 +82,6 @@ impl <T> NdArrayLike<T> for NdArray<T> {
     fn is_contiguous(&self) -> bool {
         self.is_contiguous
     }
-    fn to_view<'a, 'b: 'a>(&'b self) -> NdArrayView<'a, T> {
-        NdArrayView::new(NdArraySource::Owned(self), self.shape.clone(), self.strides.clone())
-    }
 }
 
 impl <T> NdArrayLike<T> for &NdArray<T> {
@@ -104,14 +97,11 @@ impl <T> NdArrayLike<T> for &NdArray<T> {
     fn is_contiguous(&self) -> bool {
         self.is_contiguous
     }
-    fn to_view<'a, 'b: 'a>(&'b self) -> NdArrayView<'a, T> {
-        NdArrayView::new(NdArraySource::Owned(self), self.shape.clone(), self.strides.clone())
-    }
 }
 
 impl <'a, T> NdArrayLike<T> for NdArrayView<'a, T> {
     fn data<'b, 'c: 'b>(&'c self) -> &'b [T] {
-        self.data.data()
+        self.data
     }
     fn shape(&self) -> &[usize] {
         &self.shape
@@ -120,16 +110,13 @@ impl <'a, T> NdArrayLike<T> for NdArrayView<'a, T> {
         &self.strides
     }
     fn is_contiguous(&self) -> bool {
-        self.shape == self.data.shape()
-    }
-    fn to_view<'b, 'c: 'b>(&'c self) -> NdArrayView<'b, T> {
-        NdArrayView::new(NdArraySource::View(self), self.shape.clone(), self.strides.clone())
+        todo!()
     }
 }
 
 impl <'a: 'b, 'b, T> NdArrayLike<T> for &'b NdArrayView<'a, T> {
     fn data<'c ,'d: 'c>(&'d self) -> &'c [T] {
-        self.data.data()
+        self.data
     }
     fn shape(&self) -> &[usize] {
         &self.shape
@@ -138,76 +125,7 @@ impl <'a: 'b, 'b, T> NdArrayLike<T> for &'b NdArrayView<'a, T> {
         &self.strides
     }
     fn is_contiguous(&self) -> bool {
-        self.shape == self.data.shape()
-    }
-    fn to_view<'c ,'d: 'c>(&'d self) -> NdArrayView<'c, T> {
-        NdArrayView::new(NdArraySource::View(self), self.shape.clone(), self.strides.clone())
-    }
-}
-
-impl <'a, T> NdArrayLike<T> for NdArraySource<'a, T> {
-    fn data<'b, 'c: 'b>(&'c self) -> &'b [T] {
-        match self {
-            NdArraySource::Owned(array) => &array.data,
-            NdArraySource::View(view) => view.data()
-        }
-    }
-    fn shape(&self) -> &[usize] {
-        match self {
-            NdArraySource::Owned(array) => &array.shape,
-            NdArraySource::View(view) => view.shape()
-        }
-    }
-    fn strides(&self) -> &[usize] {
-        match self {
-            NdArraySource::Owned(array) => &array.strides,
-            NdArraySource::View(view) => view.strides()
-        }
-    }
-    fn is_contiguous(&self) -> bool {
-        match self {
-            NdArraySource::Owned(array) => array.is_contiguous,
-            NdArraySource::View(view) => view.is_contiguous()
-        }
-    }
-    fn to_view<'b, 'c: 'b>(&'c self) -> NdArrayView<'b, T> {
-        match self {
-            NdArraySource::Owned(array) => array.to_view(),
-            NdArraySource::View(view) => view.to_view()
-        }
-    }
-}
-
-impl <'a: 'b, 'b, T> NdArrayLike<T> for &'b NdArraySource<'a, T> {
-    fn data<'c, 'd: 'c>(&'d self) -> &'c [T] {
-        match self {
-            NdArraySource::Owned(array) => &array.data,
-            NdArraySource::View(view) => view.data()
-        }
-    }
-    fn shape(&self) -> &[usize] {
-        match self {
-            NdArraySource::Owned(array) => &array.shape,
-            NdArraySource::View(view) => view.shape()
-        }
-    }
-    fn strides(&self) -> &[usize] {
-        match self {
-            NdArraySource::Owned(array) => &array.strides,
-            NdArraySource::View(view) => view.strides()
-        }
-    }
-    fn is_contiguous(&self) -> bool {
-        match self {
-            NdArraySource::Owned(array) => array.is_contiguous,
-            NdArraySource::View(view) => view.is_contiguous()
-        }
-    }
-    fn to_view<'c, 'd: 'c>(&'d self) -> NdArrayView<'c, T> {
-        match self {
-            NdArraySource::Owned(array) => array.to_view(),
-            NdArraySource::View(view) => view.to_view()
-        }
+        todo!()
     }
 }
 
@@ -308,8 +226,8 @@ impl <T: Clone> NdArray<T> {
 }
 
 impl <'a, T> NdArrayView<'a, T> {
-    pub fn new(array: NdArraySource<'a, T>, like: Vec<usize>, strides: Vec<usize>) -> Self {
-        match validate_view(&array.shape(), &like, &strides) {
+    pub fn new<'b: 'a>(array: &'b [T], old_shape: &[usize], like: Vec<usize>, strides: Vec<usize>) -> Self {
+        match validate_view(old_shape, &like, &strides) {
             Ok(_) => (),
             Err(e) => panic!("{:?}", e)
         }
@@ -619,8 +537,8 @@ pub fn broadcast_array<'a, 'b, 'c: 'a, 'd: 'b, L, R>(lhs: &'c impl NdArrayLike<L
             let lhs_strides = compute_strides(lhs, &lhs_shape);
             let rhs_strides = compute_strides(rhs, &rhs_shape);
 
-            Ok((NdArrayView::new(NdArraySource::View(lhs), lhs_shape, lhs_strides),
-                NdArrayView::new(NdArraySource::View(rhs), rhs_shape, rhs_strides)))
+            Ok((NdArrayView::new(lhs.data(), lhs.shape(), lhs_shape, lhs_strides),
+                NdArrayView::new(rhs.data(), rhs.shape(), rhs_shape, rhs_strides)))
         },
         Err(e) => Err(e)
     }
@@ -851,12 +769,12 @@ macro_rules! ref_view_op {
 
 /// combine `op!`, `ref_view_op!`, `ref_op!`
 ///
-/// auto implement `(NdArrayView, NdArraySource)` marco
+/// auto implement `NdArrayView` marco
 macro_rules! general_op {
     ($( ($op:tt, $op_trait:ident, $op_fn:ident) ),+) => {
         op!{$( ($op, $op_trait, $op_fn) ),+}
         ref_view_op!{$( ($op, $op_trait, $op_fn) ),+}
-        ref_op!{(NdArrayView, NdArraySource), [$( ($op, $op_trait, $op_fn) ),+]}
+        ref_op!{(NdArrayView), [$( ($op, $op_trait, $op_fn) ),+]}
     };
 }
 
@@ -957,11 +875,11 @@ macro_rules! ref_assign_op {
 
 /// combine `assign_op!`, `ref_assign_op!`
 ///
-/// auto implement `(NdArrayView, NdArraySource)` marco
+/// auto implement `NdArrayView` marco
 macro_rules! general_assign_op {
     ($( ($op:tt, $op_trait:ident, $op_fn:ident) ),+) => {
         assign_op!{$( ($op, $op_trait, $op_fn) ),+}
-        ref_assign_op!{(NdArrayView, NdArraySource), [ $( ($op, $op_trait, $op_fn) ),+ ] }
+        ref_assign_op!{(NdArrayView), [ $( ($op, $op_trait, $op_fn) ),+ ] }
     };
 }
 
@@ -1177,11 +1095,11 @@ macro_rules! ref_eco_op_scalar {
 ///
 /// here we only implement a meaningful order: `&NdArrayLike`/`NdArrayLike` `op` `Scalar`
 ///
-/// auto implement `(NdArrayView, NdArraySource)` marco
+/// auto implement `NdArrayView` marco
 macro_rules! general_no_eco_op_scalar {
     ($( ($op:tt, $op_trait:ident, $op_fn:ident) ),+) => {
         no_eco_op_scalar!{$( ($op, $op_trait, $op_fn) ),+}
-        ref_no_eco_op_scalar!{(NdArrayView, NdArraySource), [$( ($op, $op_trait, $op_fn) ),+]}
+        ref_no_eco_op_scalar!{(NdArrayView), [$( ($op, $op_trait, $op_fn) ),+]}
     };
 }
 
@@ -1191,11 +1109,11 @@ macro_rules! general_no_eco_op_scalar {
 ///
 /// here we implement the other meaningful order: `Scalar` `op` `&NdArrayLike`/`NdArrayLike`
 ///
-/// auto implement `(NdArrayView, NdArraySource)` marco
+/// auto implement `NdArrayView` marco
 macro_rules! general_eco_op_scalar {
     ($op:tt, $op_trait:ident, $op_fn:ident) => {
         eco_op_scalar!{$op, $op_trait, $op_fn}
-        ref_eco_op_scalar!{(NdArrayView, NdArraySource), [($op, $op_trait, $op_fn)]}
+        ref_eco_op_scalar!{(NdArrayView), [($op, $op_trait, $op_fn)]}
     };
 }
 
@@ -1413,7 +1331,7 @@ macro_rules! impl_nd_array_iter {
     };
 }
 
-impl_nd_array_iter!{NdArray<T>, NdArrayView<'a, T>, NdArraySource<'a, T>}
+impl_nd_array_iter!{NdArray<T>, NdArrayView<'a, T>}
 
 
 // T conversions
@@ -1473,6 +1391,6 @@ where T: Into<NT> {
 
 impl <T: Clone> From<NdArrayView<'_, T>> for NdArray<T> {
     fn from(value: NdArrayView<T>) -> Self {
-        Self::new_shape_with_strides(value.data.data().to_vec().into_boxed_slice(), value.shape, value.strides)
+        Self::new_shape_with_strides(value.data().to_vec().into_boxed_slice(), value.shape, value.strides)
     }
 }
