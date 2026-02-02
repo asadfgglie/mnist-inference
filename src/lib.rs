@@ -633,7 +633,9 @@ where LT: NdArrayLike<L>, RT: NdArrayLike<R>, {
 // so if &NdArrayView $op &NdArrayView is implement => NdArray, NdArrayView, NdArraySource
 // and their & version also implement by those macros
 // note that all op is element wise operation
-macro_rules! nd_array_op {
+
+/// basic `&NdArray`/`NdArray` operation with `&NdArray`/`NdArray`
+macro_rules! op {
     ($( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+) => {
         $(
             impl <L, R> $op_trait<NdArray<R>> for NdArray<L>
@@ -677,121 +679,13 @@ macro_rules! nd_array_op {
     };
 }
 
-macro_rules! nd_array_assign_op {
-    ($( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+) => {
-        $(
-            /// ```
-            /// use mnist_inference::*;
-            /// fn main() {
-            ///     let mut a: NdArray<f32> = NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast();
-            ///     a += NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]);
-            ///     assert_eq!(a, NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast() * Scalar(2i8));
-            ///
-            ///     a /= Scalar(2i8);
-            ///     assert_eq!(a, NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast());
-            ///
-            ///     a -= NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]);
-            ///     assert_eq!(a, NdArray::new_shape(vec![0.0; 9], vec![3,3]));
-            /// }
-            /// ```
-            impl <L, R> $op_trait<NdArray<R>> for NdArray<L>
-            where L: $op_trait + Clone, R: Into<L> + Clone {
-                fn $op_fn(&mut self, rhs: NdArray<R>) {
-                    <NdArray<L> as $op_trait<&NdArray<R>>>::$op_fn(self, &rhs);
-                }
-            }
-            impl <L, R> $op_trait<&NdArray<R>> for NdArray<L>
-            where L: $op_trait + Clone, R: Into<L> + Clone {
-                fn $op_fn(&mut self, rhs: &NdArray<R>) {
-                    let (lhs, rhs) = match broadcast_array(self, &rhs) {
-                        Ok((lhs, rhs)) => (lhs, rhs),
-                        Err(e) => panic!("{:?}", e)
-                    };
-
-                    if lhs.shape() != self.shape() {
-                        panic!(
-                            "self shape {:?} can't broadcast when operate += operator, which is cause by rhs shape {:?}",
-                            self.shape(), rhs.shape()
-                        )
-                    }
-
-                    self.contiguous_self();
-
-                    let iter: Vec<Vec<usize>> = self.iter_index().collect();
-                    for indices in iter {
-                        let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
-                        self.data[self_index] $op rhs.data()[rhs_index].clone().into();
-                    }
-                }
-            }
-            impl <L, R> $op_trait<NdArrayView<'_, R>> for NdArray<L>
-            where L: $op_trait + Clone, R: Into<L> + Clone {
-                fn $op_fn(&mut self, rhs: NdArrayView<'_, R>) {
-                    <NdArray<L> as $op_trait<&NdArrayView<'_, R>>>::$op_fn(self, &rhs);
-                }
-            }
-            impl <L, R> $op_trait<&NdArrayView<'_, R>> for NdArray<L>
-            where L: $op_trait + Clone, R: Into<L> + Clone {
-                fn $op_fn(&mut self, rhs: &NdArrayView<'_, R>) {
-                    let (lhs, rhs) = match broadcast_array(self, &rhs) {
-                        Ok((lhs, rhs)) => (lhs, rhs),
-                        Err(e) => panic!("{:?}", e)
-                    };
-
-                    if lhs.shape() != self.shape() {
-                        panic!(
-                            "self shape {:?} can't broadcast when operate += operator, which is cause by rhs shape {:?}",
-                            self.shape(), rhs.shape()
-                        )
-                    }
-
-                    self.contiguous_self();
-
-                    let iter: Vec<Vec<usize>> = self.iter_index().collect();
-                    for indices in iter {
-                        let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
-                        self.data[self_index] $op rhs.data()[rhs_index].clone().into();
-                    }
-                }
-            }
-            impl <L, R> $op_trait<NdArraySource<'_, R>> for NdArray<L>
-            where L: $op_trait + Clone, R: Into<L> + Clone {
-                fn $op_fn(&mut self, rhs: NdArraySource<'_, R>) {
-                    <NdArray<L> as $op_trait<&NdArraySource<'_, R>>>::$op_fn(self, &rhs);
-                }
-            }
-            impl <L, R> $op_trait<&NdArraySource<'_, R>> for NdArray<L>
-            where L: $op_trait + Clone, R: Into<L> + Clone {
-                fn $op_fn(&mut self, rhs: &NdArraySource<'_, R>) {
-                    let (lhs, rhs) = match broadcast_array(self, &rhs) {
-                        Ok((lhs, rhs)) => (lhs, rhs),
-                        Err(e) => panic!("{:?}", e)
-                    };
-
-                    if lhs.shape() != self.shape() {
-                        panic!(
-                            "self shape {:?} can't broadcast when operate += operator, which is cause by rhs shape {:?}",
-                            self.shape(), rhs.shape()
-                        )
-                    }
-
-                    self.contiguous_self();
-
-                    let iter: Vec<Vec<usize>> = self.iter_index().collect();
-                    for indices in iter {
-                        let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
-                        self.data[self_index] $op rhs.data()[rhs_index].clone().into();
-                    }
-                }
-            }
-        )+
-    };
-}
-
-macro_rules! nd_array_ref_op {
+/// basic `&NdArrayLike`/`NdArrayLike` operation with `&NdArrayLike`/`NdArrayLike`
+///
+/// no define `&NdArrayView` operation with `&NdArrayView` (define by `ref_view_op!`)
+macro_rules! ref_op {
     ( ( $( $type:ident ),+ ), $ops:tt ) => {
         $(
-            nd_array_ref_op!{$type, $ops}
+            ref_op!{$type, $ops}
         )+
     };
     ($type:ident, [ $( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+ ]) => {
@@ -923,7 +817,10 @@ macro_rules! nd_array_ref_op {
     };
 }
 
-macro_rules! nd_array_view_ref_op {
+/// define `&NdArrayView` operation with `&NdArrayView` as core op implementation
+///
+/// all op based on this implementation
+macro_rules! ref_view_op {
     ($( ($op:tt, $op_trait:ident, $op_fn:ident) ),+) => {
         $(
             impl <'a, 'b, 'c, 'd, L, R> $op_trait<&'d NdArrayView<'b, R>> for &'c NdArrayView<'a, L>
@@ -953,18 +850,131 @@ macro_rules! nd_array_view_ref_op {
     };
 }
 
-macro_rules! nd_array_general_op {
+/// combine `op!`, `ref_view_op!`, `ref_op!`
+///
+/// auto implement `(NdArrayView, NdArraySource)` marco
+macro_rules! general_op {
     ($( ($op:tt, $op_trait:ident, $op_fn:ident) ),+) => {
-        nd_array_op!{$( ($op, $op_trait, $op_fn) ),+}
-        nd_array_view_ref_op!{$( ($op, $op_trait, $op_fn) ),+}
-        nd_array_ref_op!{(NdArrayView, NdArraySource), [$( ($op, $op_trait, $op_fn) ),+]}
+        op!{$( ($op, $op_trait, $op_fn) ),+}
+        ref_view_op!{$( ($op, $op_trait, $op_fn) ),+}
+        ref_op!{(NdArrayView, NdArraySource), [$( ($op, $op_trait, $op_fn) ),+]}
     };
 }
 
-macro_rules! nd_array_with_non_commutative_op_scalar {
+/// basic `&NdArray`/`NdArray` assign (in-place) operation with `NdArray`
+/// ```
+/// use mnist_inference::*;
+/// fn main() {
+///     let mut a: NdArray<f32> = NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast();
+///     a += NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]);
+///     assert_eq!(a, NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast() * Scalar(2i8));
+///
+///     a /= Scalar(2i8);
+///     assert_eq!(a, NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast());
+///
+///     a -= NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]);
+///     assert_eq!(a, NdArray::new_shape(vec![0.0; 9], vec![3,3]));
+/// }
+/// ```
+macro_rules! assign_op {
+    ($( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+) => {
+        $(
+            impl <L, R> $op_trait<NdArray<R>> for NdArray<L>
+            where L: $op_trait + Clone, R: Into<L> + Clone {
+                fn $op_fn(&mut self, rhs: NdArray<R>) {
+                    <NdArray<L> as $op_trait<&NdArray<R>>>::$op_fn(self, &rhs);
+                }
+            }
+            impl <L, R> $op_trait<&NdArray<R>> for NdArray<L>
+            where L: $op_trait + Clone, R: Into<L> + Clone {
+                fn $op_fn(&mut self, rhs: &NdArray<R>) {
+                    let (lhs, rhs) = match broadcast_array(self, &rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
+
+                    if lhs.shape() != self.shape() {
+                        panic!(
+                            "self shape {:?} can't broadcast when operate += operator, which is cause by rhs shape {:?}",
+                            self.shape(), rhs.shape()
+                        )
+                    }
+
+                    self.contiguous_self();
+
+                    let iter: Vec<Vec<usize>> = self.iter_index().collect();
+                    for indices in iter {
+                        let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
+                        self.data[self_index] $op rhs.data()[rhs_index].clone().into();
+                    }
+                }
+            }
+        )+
+    };
+}
+
+/// basic `&NdArrayLike` assign (in-place) operation with `NdArray`
+macro_rules! ref_assign_op {
+    (( $( $type:ident ),+ ), $ops:tt) => {
+        $(
+            ref_assign_op!{$type, $ops}
+        )+
+    };
+    ($type:ident, [ $( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+ ]) => {
+        $(
+            impl <L, R> $op_trait<$type<'_, R>> for NdArray<L>
+            where L: $op_trait + Clone, R: Into<L> + Clone {
+                fn $op_fn(&mut self, rhs: $type<'_, R>) {
+                    <NdArray<L> as $op_trait<&$type<'_, R>>>::$op_fn(self, &rhs);
+                }
+            }
+            impl <L, R> $op_trait<&$type<'_, R>> for NdArray<L>
+            where L: $op_trait + Clone, R: Into<L> + Clone {
+                fn $op_fn(&mut self, rhs: &$type<'_, R>) {
+                    let (lhs, rhs) = match broadcast_array(self, &rhs) {
+                        Ok((lhs, rhs)) => (lhs, rhs),
+                        Err(e) => panic!("{:?}", e)
+                    };
+
+                    if lhs.shape() != self.shape() {
+                        panic!(
+                            "self shape {:?} can't broadcast when operate += operator, which is cause by rhs shape {:?}",
+                            self.shape(), rhs.shape()
+                        )
+                    }
+
+                    self.contiguous_self();
+
+                    let iter: Vec<Vec<usize>> = self.iter_index().collect();
+                    for indices in iter {
+                        let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
+                        self.data[self_index] $op rhs.data()[rhs_index].clone().into();
+                    }
+                }
+            }
+        )+
+    };
+}
+
+/// combine `assign_op!`, `ref_assign_op!`
+///
+/// auto implement `(NdArrayView, NdArraySource)` marco
+macro_rules! general_assign_op {
+    ($( ($op:tt, $op_trait:ident, $op_fn:ident) ),+) => {
+        assign_op!{$( ($op, $op_trait, $op_fn) ),+}
+        ref_assign_op!{(NdArrayView, NdArraySource), [ $( ($op, $op_trait, $op_fn) ),+ ] }
+    };
+}
+
+/// base on vector space axiom and language meanings, we only implement `*`, `/`, and `%`
+/// 
+/// but only `*` satisfy commutative, which can ExChange Order (eco)
+/// 
+/// here we only implement a meaningful order: `&NdArray`/`NdArray` `op` `Scalar`
+macro_rules! no_eco_op_scalar {
     ($( ($op:tt, $op_trait:ident, $op_fn:ident) ),+) => {
         $(
-            nd_array_with_non_commutative_op_scalar!{$op, $op_trait, $op_fn}
+            eco_op_scalar!{$op, $op_trait, $op_fn}
         )+
     };
     ($op:tt, $op_trait:ident, $op_fn:ident) => {
@@ -1006,9 +1016,14 @@ macro_rules! nd_array_with_non_commutative_op_scalar {
     };
 }
 
-macro_rules! nd_array_with_commutative_op_scalar {
+/// base on vector space axiom and language meanings, we only implement `*`, `/`, and `%`
+///
+/// but only `*` satisfy commutative, which can ExChange Order (eco)
+///
+/// here we implement the other meaningful order: `Scalar` `op` `&NdArray`/`NdArray`
+macro_rules! eco_op_scalar {
     ($op:tt, $op_trait:ident, $op_fn:ident) => {
-        nd_array_with_non_commutative_op_scalar!{$op, $op_trait, $op_fn}
+        no_eco_op_scalar!{$op, $op_trait, $op_fn}
 
         impl <T, ST> $op_trait<NdArray<T>> for Scalar<ST>
         where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
@@ -1048,15 +1063,20 @@ macro_rules! nd_array_with_commutative_op_scalar {
     };
     ([ $( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+ ]) => {
         $(
-            nd_array_with_commutative_op_scalar!{$op, $op_trait, $op_fn}
+            eco_op_scalar!{$op, $op_trait, $op_fn}
         )+
     };
 }
 
-macro_rules! nd_array_ref_with_non_commutative_op_scalar {
+/// base on vector space axiom and language meanings, we only implement `*`, `/`, and `%`
+///
+/// but only `*` satisfy commutative, which can ExChange Order (eco)
+///
+/// here we only implement a meaningful order: `&NdArrayLike`/`NdArrayLike` `op` `Scalar`
+macro_rules! ref_no_eco_op_scalar {
     (( $( $type:ident ),+ ), $ops:tt) => {
         $(
-            nd_array_ref_with_non_commutative_op_scalar!{$type, $ops}
+            ref_no_eco_op_scalar!{$type, $ops}
         )+
     };
     ($type:ident, [ $( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+ ]) => {
@@ -1100,14 +1120,19 @@ macro_rules! nd_array_ref_with_non_commutative_op_scalar {
     };
 }
 
-macro_rules! nd_array_ref_with_commutative_op_scalar {
+/// base on vector space axiom and language meanings, we only implement `*`, `/`, and `%`
+///
+/// but only `*` satisfy commutative, which can ExChange Order (eco)
+///
+/// here we implement the other meaningful order: `Scalar` `op` `&NdArrayLike`/`NdArrayLike`
+macro_rules! ref_eco_op_scalar {
     (( $( $type:ident ),+ ), $ops:tt) => {
         $(
-            nd_array_ref_with_commutative_op_scalar!{$type, $ops}
+            ref_eco_op_scalar!{$type, $ops}
         )+
     };
     ($type:ident, [($op:tt, $op_trait:ident, $op_fn:ident)]) => {
-        nd_array_ref_with_non_commutative_op_scalar!{$type, [($op, $op_trait, $op_fn)]}
+        ref_no_eco_op_scalar!{$type, [($op, $op_trait, $op_fn)]}
 
         impl <'a, T, ST> $op_trait<$type<'a, T>> for Scalar<ST>
         where T: $op_trait<Output=T> + Clone, ST: Into<T> + Clone {
@@ -1147,28 +1172,67 @@ macro_rules! nd_array_ref_with_commutative_op_scalar {
     };
 }
 
-nd_array_general_op!{(+, Add, add), (-, Sub, sub), (*, Mul, mul), (/, Div, div), (%, Rem, rem)}
-nd_array_assign_op!{(+=, AddAssign, add_assign), (-=, SubAssign, sub_assign), (*=, MulAssign, mul_assign), (/=, DivAssign, div_assign), (%=, RemAssign, rem_assign)}
-nd_array_with_non_commutative_op_scalar!{(%, Rem, rem), (/, Div, div)}
-nd_array_with_commutative_op_scalar!{*, Mul, mul}
-nd_array_ref_with_non_commutative_op_scalar!{(NdArrayView, NdArraySource), [(%, Rem, rem), (/, Div, div)]}
-nd_array_ref_with_commutative_op_scalar!{(NdArrayView, NdArraySource), [(*, Mul, mul)]}
-
-impl <T, ST> MulAssign<Scalar<ST>> for NdArray<T>
-where T: MulAssign, ST: Into<T> + Clone {
-    fn mul_assign(&mut self, rhs: Scalar<ST>) {
-        self.data.iter_mut()
-            .for_each(|x| *x *= rhs.0.clone().into());
-    }
+/// base on vector space axiom and language meanings, we only implement `*`, `/`, and `%`
+///
+/// but only `*` satisfy commutative, which can ExChange Order (eco)
+///
+/// here we only implement a meaningful order: `&NdArrayLike`/`NdArrayLike` `op` `Scalar`
+///
+/// auto implement `(NdArrayView, NdArraySource)` marco
+macro_rules! general_no_eco_op_scalar {
+    ($( ($op:tt, $op_trait:ident, $op_fn:ident) ),+) => {
+        no_eco_op_scalar!{$( ($op, $op_trait, $op_fn) ),+}
+        ref_no_eco_op_scalar!{(NdArrayView, NdArraySource), [$( ($op, $op_trait, $op_fn) ),+]}
+    };
 }
 
-impl <T, ST> DivAssign<Scalar<ST>> for NdArray<T>
-where T: DivAssign, ST: Into<T> + Clone {
-    fn div_assign(&mut self, rhs: Scalar<ST>) {
-        self.data.iter_mut()
-            .for_each(|x| *x /= rhs.0.clone().into());
-    }
+/// base on vector space axiom and language meanings, we only implement `*`, `/`, and `%`
+///
+/// but only `*` satisfy commutative, which can ExChange Order (eco)
+///
+/// here we implement the other meaningful order: `Scalar` `op` `&NdArrayLike`/`NdArrayLike`
+///
+/// auto implement `(NdArrayView, NdArraySource)` marco
+macro_rules! general_eco_op_scalar {
+    ($op:tt, $op_trait:ident, $op_fn:ident) => {
+        eco_op_scalar!{$op, $op_trait, $op_fn}
+        ref_eco_op_scalar!{(NdArrayView, NdArraySource), [($op, $op_trait, $op_fn)]}
+    };
 }
+
+macro_rules! assign_scalar_op {
+    ($( ($op:tt, $op_trait:ident, $op_fn:ident) ),+) => {
+        $(
+            impl <T, ST> $op_trait<Scalar<ST>> for NdArray<T>
+            where T: $op_trait + Clone, ST: Into<T> + Clone {
+                fn $op_fn(&mut self, rhs: Scalar<ST>) {
+                    <NdArray<T> as $op_trait<&Scalar<ST>>>::$op_fn(self, &rhs)
+                }
+            }
+
+            impl <T, ST> $op_trait<&Scalar<ST>> for NdArray<T>
+            where T: $op_trait + Clone, ST: Into<T> + Clone {
+                fn $op_fn(&mut self, rhs: &Scalar<ST>) {
+                    self.contiguous_self();
+                    self.data.iter_mut().for_each(|x| {
+                        let rhs = rhs.0.clone();
+                        *x $op rhs.into();
+                    });
+                }
+            }
+        )+
+    };
+
+}
+
+general_op!{(+, Add, add), (-, Sub, sub), (*, Mul, mul), (/, Div, div), (%, Rem, rem)}
+general_assign_op!{
+    (+=, AddAssign, add_assign), (-=, SubAssign, sub_assign), (*=, MulAssign, mul_assign), 
+    (/=, DivAssign, div_assign), (%=, RemAssign, rem_assign)
+}
+general_no_eco_op_scalar!{(%, Rem, rem), (/, Div, div)}
+general_eco_op_scalar!{*, Mul, mul}
+assign_scalar_op!{(*=, MulAssign, mul_assign), (%=, RemAssign, rem_assign), (/=, DivAssign, div_assign)}
 
 
 // Scalar math op
