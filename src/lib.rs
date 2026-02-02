@@ -1055,7 +1055,6 @@ macro_rules! nd_array_with_commutative_op_scalar {
 
 macro_rules! nd_array_ref_with_non_commutative_op_scalar {
     (( $( $type:ident ),+ ), $ops:tt) => {
-        nd_array_with_commutative_op_scalar!{$ops}
         $(
             nd_array_ref_with_non_commutative_op_scalar!{$type, $ops}
         )+
@@ -1103,7 +1102,6 @@ macro_rules! nd_array_ref_with_non_commutative_op_scalar {
 
 macro_rules! nd_array_ref_with_commutative_op_scalar {
     (( $( $type:ident ),+ ), $ops:tt) => {
-        nd_array_with_commutative_op_scalar!{$ops}
         $(
             nd_array_ref_with_commutative_op_scalar!{$type, $ops}
         )+
@@ -1151,6 +1149,8 @@ macro_rules! nd_array_ref_with_commutative_op_scalar {
 
 nd_array_general_op!{(+, Add, add), (-, Sub, sub), (*, Mul, mul), (/, Div, div), (%, Rem, rem)}
 nd_array_assign_op!{(+=, AddAssign, add_assign), (-=, SubAssign, sub_assign), (*=, MulAssign, mul_assign), (/=, DivAssign, div_assign), (%=, RemAssign, rem_assign)}
+nd_array_with_non_commutative_op_scalar!{(%, Rem, rem), (/, Div, div)}
+nd_array_with_commutative_op_scalar!{*, Mul, mul}
 nd_array_ref_with_non_commutative_op_scalar!{(NdArrayView, NdArraySource), [(%, Rem, rem), (/, Div, div)]}
 nd_array_ref_with_commutative_op_scalar!{(NdArrayView, NdArraySource), [(*, Mul, mul)]}
 
