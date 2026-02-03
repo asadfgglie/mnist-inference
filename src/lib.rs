@@ -31,7 +31,7 @@ pub struct NdArrayDataIndexIterator<'a> {
 
 struct IndexIterator<'a> {
     data_shape: &'a [usize],
-    index: Vec<usize>,
+    index: Box<[usize]>,
     axis_counter: usize,
     has_done: bool,
 }
@@ -40,6 +40,7 @@ struct IndexIterator<'a> {
 pub enum NdArrayError {
     BroadcastError(String),
     InvalidStridesError(String),
+    InvalidShapeError(String),
 }
 
 #[derive(Debug, PartialEq)]
@@ -203,19 +204,19 @@ impl <T> NdArray<T> {
         Self::new_shape(data, shape)
     }
 
-    pub fn item(self) -> Scalar<T> {
+    pub fn item(self) -> Result<Scalar<T>, NdArrayError> {
         if self.shape != vec![1] {
-            panic!(
+            return Err(NdArrayError::InvalidShapeError(format!(
                 "shape must be 1 dimension 1 element array, but got {:?}", self.shape
-            )
+            )))
         }
         let self_info = format!(
             "self.shape: {:?}, self.stride: {:?}, self.data.len: {}",
             self.shape, self.strides, self.data.len()
         );
-        self.data.into_vec().pop().expect(&format!(
+        Ok(self.data.into_vec().pop().expect(&format!(
             "self.data seems empty, but this should not happen. {}", self_info
-        )).into()
+        )).into())
     }
 }
 
@@ -225,9 +226,7 @@ impl <T: Clone> NdArray<T> {
             self
         } else {
             let mut data: Vec<T> = Vec::with_capacity(self.shape.iter().product());
-
-            self.into_iter()
-                .for_each(|x| data.push(x.clone()));
+            data.extend(self.into_iter().cloned());
             Self::new_shape(data, self.shape.clone())
         }
     }
@@ -235,9 +234,7 @@ impl <T: Clone> NdArray<T> {
     pub fn contiguous_self(& mut self) {
         if !self.is_contiguous() {
             let mut data: Vec<T> = Vec::with_capacity(self.shape.iter().product());
-
-            self.into_iter()
-                .for_each(|x| data.push(x.clone()));
+            data.extend(self.into_iter().cloned());
             self.data = data.into_boxed_slice();
             self.strides = compute_stride(&self.shape);
         }
@@ -245,15 +242,15 @@ impl <T: Clone> NdArray<T> {
 }
 
 impl <'a, T> NdArrayView<'a, T> {
-    pub fn new<'b: 'a>(array: &'b [T], old_shape: &[usize], like: Vec<usize>, strides: Vec<usize>) -> Self {
-        match validate_view(old_shape, &like, &strides) {
+    pub fn new<'b: 'a>(array: &'b [T], old_shape: &[usize], shape: Vec<usize>, strides: Vec<usize>) -> Self {
+        match validate_view(old_shape, &shape, &strides) {
             Ok(_) => (),
             Err(e) => panic!("{:?}", e)
         }
 
         Self {
             data: array,
-            shape: like,
+            shape,
             strides,
         }
     }
@@ -285,7 +282,7 @@ impl <'a> IndexIterator<'a> {
 
         Self {
             data_shape: shape,
-            index: vec![0; rank],
+            index: vec![0; rank].into_boxed_slice(),
             axis_counter: rank - 1,
             has_done: false,
         }
@@ -352,7 +349,8 @@ fn validate_view(old_shape: &[usize], view_shape: &[usize], view_stride: &[usize
                 )))
             } else if v > o && o == 1 && s != 0 {
                 return Err(NdArrayError::InvalidStridesError(format!(
-                    "Strides {:?} are invalid for a view of shape {:?}, old shape: {:?}",
+                    "Strides {:?} are invalid for a view of shape {:?}, old shape: {:?}. \
+                    Broadcast axis stride must be zero!",
                     view_stride, view_shape, old_shape
                 )))
             }
@@ -1176,7 +1174,7 @@ general_no_eco_op_scalar!{(%, Rem, rem), (/, Div, div)}
 general_eco_op_scalar!{*, Mul, mul}
 assign_scalar_op!{(*=, MulAssign, mul_assign), (%=, RemAssign, rem_assign), (/=, DivAssign, div_assign)}
 
-pub fn matmul<L: Clone + Add<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayLike<L>, rhs: & impl NdArrayLike<R>) -> NdArray<L> {
+pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayLike<L>, rhs: & impl NdArrayLike<R>) -> NdArray<L> {
     if lhs.shape().len() == 1 && rhs.shape().len() == 1 { // vector dot product
         if lhs.shape() != rhs.shape() {
             panic!(
@@ -1187,13 +1185,13 @@ pub fn matmul<L: Clone + Add<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
 
         let mut ret: Vec<L> = Vec::with_capacity(1);
         for index in lhs.iter_index() {
-            let tmp: L = lhs.data()[lhs.compute_index(&index)].clone() + rhs.data()[rhs.compute_index(&index)].clone().into();
+            let tmp: L = lhs.data()[lhs.compute_index(&index)].clone() * rhs.data()[rhs.compute_index(&index)].clone().into();
 
             match ret.is_empty() {
                 true => ret.push(tmp),
                 false => {
                     let v = ret.pop().unwrap();
-                    ret.push(v + tmp);
+                    ret.push(v * tmp);
                 }
             }
         }
@@ -1238,6 +1236,7 @@ pub fn matmul<L: Clone + Add<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
         data_shape.push(m);
         data_shape.push(n);
         let mut data: Vec<L> = Vec::with_capacity(data_shape.iter().product());
+        let data_stride = compute_stride(&data_shape);
 
         for batch_size_index in IndexIterator::iter_shape(&broadcast_batch_shape) {
             for i in 0..m {
@@ -1258,23 +1257,23 @@ pub fn matmul<L: Clone + Add<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
                         rhs_index.push(k);
                         rhs_index.push(j);
 
-                        let tmp = lhs.data()[lhs.compute_index(&lhs_index)].clone() + rhs.data()[rhs.compute_index(&rhs_index)].clone().into();
+                        let tmp = lhs.data()[lhs.compute_index(&lhs_index)].clone() * rhs.data()[rhs.compute_index(&rhs_index)].clone().into();
                         match tmp_ret.is_empty() {
                             true => tmp_ret.push(tmp),
                             false => {
                                 let v = tmp_ret.pop().unwrap();
-                                tmp_ret.push(v + tmp);
+                                tmp_ret.push(v * tmp);
                             }
                         }
                     }
 
                     assert_eq!(tmp_ret.len(), 1);
-                    data[data_index.iter().product::<usize>()] = tmp_ret.pop().unwrap();
+                    data[compute_index(&data_index, &data_stride)] = tmp_ret.pop().unwrap();
                 }
             }
         }
 
-        NdArray::new_shape(data, data_shape)
+        NdArray::new_shape_with_strides(data.into_boxed_slice(), data_shape, data_stride)
     } else {
         panic!(
             "Unexcept shape, lhs shape len and rhs shape len must greater than 0. lhs shape: {:?}, rhs shape: {:?}",
@@ -1368,7 +1367,7 @@ where L: RemAssign, R: Into<L> {
 
 // Indexing
 impl <T, Idx> Index<Idx> for NdArray<T>
-where T: Add<Output=T>, Idx: Into<Vec<usize>>{
+where Idx: Into<Vec<usize>>{
     type Output = T;
 
     fn index(&self, index: Idx) -> &Self::Output {
@@ -1536,7 +1535,7 @@ where T: Into<NT> {
 impl <T: Clone> From<NdArrayView<'_, T>> for NdArray<T> {
     fn from(value: NdArrayView<T>) -> Self {
         let mut data = Vec::with_capacity(value.shape.iter().product());
-        value.into_iter().for_each(|x| data.push(x.clone()));
+        data.extend(value.into_iter().cloned());
         Self::new_shape(data, value.shape)
     }
 }
