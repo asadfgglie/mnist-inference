@@ -1178,7 +1178,7 @@ assign_scalar_op!{(*=, MulAssign, mul_assign), (%=, RemAssign, rem_assign), (/=,
 
 pub fn matmul<L: Clone + Add<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayLike<L>, rhs: & impl NdArrayLike<R>) -> NdArray<L> {
     if lhs.shape().len() == 1 && rhs.shape().len() == 1 { // vector dot product
-        if lhs.shape() == rhs.shape() {
+        if lhs.shape() != rhs.shape() {
             panic!(
                 "Unexcept shape, vector lhs shape len and vector rhs shape len must same. lhs shape: {:?}, rhs shape: {:?}",
                 lhs.shape(), rhs.shape()
