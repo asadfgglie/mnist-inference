@@ -24,9 +24,13 @@ pub struct NdArrayIterator<'a, T: NdArrayLike<DT>, DT> {
 
 // Iter index by NdArray shape and stride
 pub struct NdArrayDataIndexIterator<'a> {
-    ref_data_len: usize,
-    ref_data_shape: &'a [usize],
-    ref_data_strides: &'a [usize],
+    data_len: usize,
+    data_strides: &'a [usize],
+    iter: IndexIterator<'a>
+}
+
+struct IndexIterator<'a> {
+    data_shape: &'a [usize],
     index: Vec<usize>,
     axis_counter: usize,
     has_done: bool,
@@ -69,6 +73,46 @@ pub trait NdArrayLike<T> {
     fn iter_index<'a>(&'a self) -> NdArrayDataIndexIterator<'a>
     where Self: Sized, T: 'a {
         NdArrayDataIndexIterator::new(self)
+    }
+    fn reshape<'a, 'b: 'a>(&'b self, shape: Vec<usize>) -> NdArrayView<'a, T> {
+        let stride = compute_broadcast_strides(self.shape(), self.strides(), &shape);
+        NdArrayView::new(self.data(), self.shape(), shape, stride)
+    }
+    fn squeeze<'a, 'b: 'a>(&'b self, axis: usize) -> NdArrayView<'a, T> {
+        match self.shape().get(axis) {
+            Some(v) => {
+                if *v != 1 {
+                    self.to_view()
+                } else {
+                    let mut shape = self.shape().to_vec();
+                    shape.remove(axis);
+                    self.reshape(shape)
+                }
+            },
+            None => {
+                panic!("Index out of bounds, shape: {:?}, axis: {axis}", self.shape())
+            }
+        }
+    }
+    fn unsqueeze<'a, 'b: 'a>(&'b self, axis: usize) -> NdArrayView<'a, T> {
+        match axis <= self.shape().len() {
+            true => {
+                let mut shape = Vec::with_capacity(self.shape().len() + 1);
+                for (i, &j) in self.shape().iter().enumerate() {
+                    if i == axis {
+                        shape.push(1);
+                    }
+                    shape.push(j);
+                }
+                if axis == self.shape().len() {
+                    shape.push(1);
+                }
+                self.reshape(shape)
+            },
+            false => {
+                panic!("Index out of bounds, shape: {:?}, axis: {axis}", self.shape())
+            }
+        }
     }
 }
 
@@ -173,20 +217,6 @@ impl <T> NdArray<T> {
             "self.data seems empty, but this should not happen. {}", self_info
         )).into()
     }
-
-    pub fn matmul<R>(&self, rhs: & impl NdArrayLike<R>) -> Self {
-        let (lhs, rhs) = match broadcast_array(self, rhs) {
-            Ok((lhs, rhs)) => (lhs, rhs),
-            Err(e) => panic!("{:?}", e)
-        };
-
-        let lhs_batch_shape = &lhs.strides()[0..lhs.strides().len()];
-        let rhs_batch_shape = &rhs.strides()[0..rhs.strides().len()];
-
-        let lhs_batch_stride = compute_stride(lhs_batch_shape);
-        let rhs_batch_stride = compute_stride(rhs_batch_shape);
-        todo!()
-    }
 }
 
 impl <T: Clone> NdArray<T> {
@@ -227,10 +257,6 @@ impl <'a, T> NdArrayView<'a, T> {
             strides,
         }
     }
-
-    pub fn shape(&self) -> &Vec<usize> {
-        &self.shape
-    }
 }
 
 impl <'a, T: NdArrayLike<DT>, DT> NdArrayIterator<'a, T, DT> {
@@ -245,12 +271,20 @@ impl <'a, T: NdArrayLike<DT>, DT> NdArrayIterator<'a, T, DT> {
 
 impl <'a> NdArrayDataIndexIterator<'a> {
     pub fn new<'b: 'a, T>(array: &'b impl NdArrayLike<T>) -> Self {
-        let rank = array.shape().len();
+        Self {
+            data_len: array.data().len(),
+            data_strides: array.strides(),
+            iter: IndexIterator::iter_shape(array.shape()),
+        }
+    }
+}
+
+impl <'a> IndexIterator<'a> {
+    pub fn iter_shape<'b: 'a>(shape: &'b [usize]) -> Self {
+        let rank = shape.len();
 
         Self {
-            ref_data_len: array.data().len(),
-            ref_data_shape: array.shape(),
-            ref_data_strides: array.strides(),
+            data_shape: shape,
             index: vec![0; rank],
             axis_counter: rank - 1,
             has_done: false,
@@ -419,6 +453,47 @@ pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<Vec<usize>, NdAr
     Ok(ret)
 }
 
+fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize], broadcast_shape: &[usize]) -> Vec<usize> {
+    let mut strides: Vec<usize> = Vec::with_capacity(broadcast_shape.len());
+
+    let mut old_shape_iter = old_shape.iter().rev();
+    let mut broadcast_shape_iter = broadcast_shape.iter().rev();
+    let mut old_stride_iter = old_stride.iter().rev();
+
+    loop {
+        let (o, b) = (old_shape_iter.next(), broadcast_shape_iter.next());
+
+        if o == None && b == None {
+            break;
+        }
+
+        let (o, b) = (match o {
+            Some(x) => *x,
+            None => 0 // hidden broadcast dimension, you can treat as unsqueeze axis
+        }, match b {
+            Some(x) => *x,
+            None => panic!(
+                "broadcast_shape shorter than old_array.shape, broadcast_shape len: {}, \
+                                old_array.shape len: {}",
+                broadcast_shape.len(),
+                old_shape.len()
+            )
+        });
+
+        if o == 1 || o == 0 && b > o { // this is the broadcast dimension,
+            // so stride is always 0
+            strides.push(0)
+        } else {
+            strides.push(*old_stride_iter.next().expect(
+                "Unable to get old stride. old_stride_iter.next() is None."
+            ))
+        }
+    }
+
+    strides.reverse();
+    strides
+}
+
 
 /// Broadcasts the shapes of two `NdArray` objects to ensure compatibility for operations
 /// that require aligned shapes (e.g., element-wise operations).
@@ -454,7 +529,7 @@ pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<Vec<usize>, NdAr
 ///
 /// # Example
 /// ```
-/// use mnist_inference::{broadcast_array, NdArray};
+/// use mnist_inference::{broadcast_array, NdArray, NdArrayLike};
 ///
 /// let array1 = NdArray::new_shape(vec![0.0, 1.0, 2.0], vec![1, 3, 1]);
 /// let array2 = NdArray::new_shape(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0], vec![2, 1, 3]);
@@ -479,57 +554,16 @@ pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<Vec<usize>, NdAr
 pub fn broadcast_array<'a, 'b, 'c: 'a, 'd: 'b, L, R>(lhs: &'c impl NdArrayLike<L>, rhs: &'d impl NdArrayLike<R>)
     -> Result<(NdArrayView<'a, L>, NdArrayView<'b, R>), NdArrayError> {
     match broadcast_shapes(&lhs.shape(), &rhs.shape()) {
-        Ok(batch_shape) => {
-            let rhs_shape = batch_shape.clone();
-            let lhs_shape = batch_shape;
+        Ok(broadcast_shape) => {
+            let rhs_shape = broadcast_shape.clone();
+            let lhs_shape = broadcast_shape;
 
-            fn compute_strides<T>(old_array: &impl NdArrayLike<T>, broadcast_shape: &[usize]) -> Vec<usize> {
-                let mut strides: Vec<usize> = Vec::with_capacity(broadcast_shape.len());
-
-                let mut old_shape_iter = old_array.shape().iter().rev();
-                let mut broadcast_shape_iter = broadcast_shape.iter().rev();
-                let mut old_stride_iter = old_array.strides().iter().rev();
-
-                loop {
-                    let (o, b) = (old_shape_iter.next(), broadcast_shape_iter.next());
-
-                    if o == None && b == None {
-                        break;
-                    }
-
-                    let (o, b) = (match o {
-                        Some(x) => *x,
-                        None => 0 // hidden broadcast dimension
-                    }, match b {
-                        Some(x) => *x,
-                        None => panic!(
-                            "broadcast_shape shorter than old_array.shape, broadcast_shape len: {}, \
-                                old_array.shape len: {}",
-                            broadcast_shape.len(),
-                            old_array.shape().len()
-                        )
-                    });
-
-                    if o == 1 || o == 0 && b > o { // this is the broadcast dimension,
-                        // so stride is always 0
-                        strides.push(0)
-                    } else {
-                        strides.push(*old_stride_iter.next().expect(
-                            "Unable to get old stride. old_stride_iter.next() is None."
-                        ))
-                    }
-                }
-
-                strides.reverse();
-                strides
-            }
-
-            let lhs_strides = compute_strides(lhs, &lhs_shape);
-            let rhs_strides = compute_strides(rhs, &rhs_shape);
+            let lhs_strides = compute_broadcast_strides(lhs.shape(), lhs.strides(), &lhs_shape);
+            let rhs_strides = compute_broadcast_strides(rhs.shape(), rhs.strides(), &rhs_shape);
 
             Ok((NdArrayView::new(lhs.data(), lhs.shape(), lhs_shape, lhs_strides),
                 NdArrayView::new(rhs.data(), rhs.shape(), rhs_shape, rhs_strides)))
-        },
+        }
         Err(e) => Err(e)
     }
 }
@@ -1142,6 +1176,113 @@ general_no_eco_op_scalar!{(%, Rem, rem), (/, Div, div)}
 general_eco_op_scalar!{*, Mul, mul}
 assign_scalar_op!{(*=, MulAssign, mul_assign), (%=, RemAssign, rem_assign), (/=, DivAssign, div_assign)}
 
+pub fn matmul<L: Clone + Add<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayLike<L>, rhs: & impl NdArrayLike<R>) -> NdArray<L> {
+    if lhs.shape().len() == 1 && rhs.shape().len() == 1 { // vector dot product
+        if lhs.shape() == rhs.shape() {
+            panic!(
+                "Unexcept shape, vector lhs shape len and vector rhs shape len must same. lhs shape: {:?}, rhs shape: {:?}",
+                lhs.shape(), rhs.shape()
+            )
+        }
+
+        let mut ret: Vec<L> = Vec::with_capacity(1);
+        for index in lhs.iter_index() {
+            let tmp: L = lhs.data()[lhs.compute_index(&index)].clone() + rhs.data()[rhs.compute_index(&index)].clone().into();
+
+            match ret.is_empty() {
+                true => ret.push(tmp),
+                false => {
+                    let v = ret.pop().unwrap();
+                    ret.push(v + tmp);
+                }
+            }
+        }
+
+        assert_eq!(ret.len(), 1);
+        NdArray::new(ret)
+    } else if lhs.shape().len() == 1 && rhs.shape().len() > 1 {
+        let ret = matmul(&lhs.reshape(vec![1, lhs.shape()[0]]), rhs);
+        ret.squeeze(ret.shape().len() - 2).into()
+    } else if lhs.shape().len() > 1 && rhs.shape().len() == 1 {
+        let ret = matmul(lhs, &rhs.reshape(vec![rhs.shape()[0], 1]));
+        ret.squeeze(ret.shape().len() - 1).into()
+    } else if lhs.shape().len() > 1 && rhs.shape().len() > 1 {
+        let shape_split = |shape: &[usize]| {
+            match shape.len() > 2 {
+                true => (shape[0..shape.len() - 2].to_vec(), shape[shape.len() - 2..].to_vec()),
+                false => (Vec::new(), shape.to_vec())
+            }
+        };
+        let ((lhs_batch_shape, lhs_data_shape),
+            (rhs_batch_shape, rhs_data_shape)) = (
+            shape_split(lhs.shape()), shape_split(rhs.shape()),
+        );
+
+        let (m, p) = (lhs_data_shape[0], lhs_data_shape[1]);
+        let (pp, n) = (rhs_data_shape[0], rhs_data_shape[1]);
+        if p != pp {
+            panic!("Mismatch shape. lhs shape: {:?}, rhs shape: {:?}", lhs.shape(), rhs.shape());
+        }
+
+        let broadcast_batch_shape = match broadcast_shapes(&lhs_batch_shape, &rhs_batch_shape) {
+            Ok(x) => x,
+            Err(e) => panic!("{e:?}")
+        };
+
+        let lhs = lhs.reshape([broadcast_batch_shape.clone(), lhs_data_shape].concat());
+        let rhs = rhs.reshape([broadcast_batch_shape.clone(), rhs_data_shape].concat());
+        // lhs: (broadcast_batch_shape, M, P)
+        // rhs: (broadcast_batch_shape, P, N)
+
+        let mut data_shape = broadcast_batch_shape.clone();
+        data_shape.push(m);
+        data_shape.push(n);
+        let mut data: Vec<L> = Vec::with_capacity(data_shape.iter().product());
+
+        for batch_size_index in IndexIterator::iter_shape(&broadcast_batch_shape) {
+            for i in 0..m {
+                for j in 0..n {
+                    let mut data_index = batch_size_index.clone();
+                    data_index.push(i);
+                    data_index.push(j);
+
+                    let mut tmp_ret: Vec<L> = Vec::with_capacity(1);
+
+                    for k in 0..p {
+                        let mut lhs_index = batch_size_index.clone();
+                        let mut rhs_index = batch_size_index.clone();
+
+                        lhs_index.push(i);
+                        lhs_index.push(k);
+
+                        rhs_index.push(k);
+                        rhs_index.push(j);
+
+                        let tmp = lhs.data()[lhs.compute_index(&lhs_index)].clone() + rhs.data()[rhs.compute_index(&rhs_index)].clone().into();
+                        match tmp_ret.is_empty() {
+                            true => tmp_ret.push(tmp),
+                            false => {
+                                let v = tmp_ret.pop().unwrap();
+                                tmp_ret.push(v + tmp);
+                            }
+                        }
+                    }
+
+                    assert_eq!(tmp_ret.len(), 1);
+                    data[data_index.iter().product::<usize>()] = tmp_ret.pop().unwrap();
+                }
+            }
+        }
+
+        NdArray::new_shape(data, data_shape)
+    } else {
+        panic!(
+            "Unexcept shape, lhs shape len and rhs shape len must greater than 0. lhs shape: {:?}, rhs shape: {:?}",
+            lhs.shape(), rhs.shape()
+        )
+    }
+}
+
 
 // Scalar math op
 impl <L, R> Add<Scalar<R>> for Scalar<L>
@@ -1260,23 +1401,36 @@ impl <'a> Iterator for NdArrayDataIndexIterator<'a> {
     type Item = Vec<usize>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        match self.iter.next() {
+            None => None,
+            Some(index) => {
+                let i = compute_index(&index, self.data_strides);
+                if i >= self.data_len {
+                    panic!(
+                        "Index out of bounds. Index: {:?}, array shape: {:?}, array strides: {:?}. array data len: {}",
+                        index, self.iter.data_shape, self.data_strides, self.data_len
+                    )
+                }
+                Some(index)
+            }
+        }
+    }
+}
+
+impl <'a> Iterator for IndexIterator<'a> {
+    type Item = Vec<usize>;
+
+    fn next(&mut self) -> Option<Self::Item> {
         if self.has_done {
             return None;
         }
 
-        let index = compute_index(&self.index, self.ref_data_strides);
-        if index >= self.ref_data_len {
-            panic!(
-                "Index out of bounds. Index: {:?}, array shape: {:?}, array strides: {:?}. array data len: {}",
-                self.index, self.ref_data_shape, self.ref_data_strides, self.ref_data_len
-            )
-        }
         let index = self.index.to_vec();
 
         self.index[self.axis_counter] += 1;
 
         let mut axis_change = false;
-        while self.index[self.axis_counter] >= self.ref_data_shape[self.axis_counter] {
+        while self.index[self.axis_counter] >= self.data_shape[self.axis_counter] {
             axis_change = true;
             let len = self.index.len();
             self.index[self.axis_counter..len].iter_mut().for_each(|x| *x = 0);
@@ -1381,6 +1535,8 @@ where T: Into<NT> {
 
 impl <T: Clone> From<NdArrayView<'_, T>> for NdArray<T> {
     fn from(value: NdArrayView<T>) -> Self {
-        Self::new_shape_with_strides(value.data().to_vec().into_boxed_slice(), value.shape, value.strides)
+        let mut data = Vec::with_capacity(value.shape.iter().product());
+        value.into_iter().for_each(|x| data.push(x.clone()));
+        Self::new_shape(data, value.shape)
     }
 }
