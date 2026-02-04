@@ -51,7 +51,7 @@ pub struct NdArrayFastDataIndexIterator<'a> {
 /// Iter logical index like `vec![1, 2, 0]` by shape.
 ///
 /// Avoid using this for a big shape. This will cause lots of allocated.
-struct IndexIterator<'a> {
+pub struct IndexIterator<'a> {
     data_shape: &'a [usize],
     index: NdArrayIndex,
     axis_counter: usize,
@@ -65,7 +65,7 @@ pub enum NdArrayError {
     InvalidShapeError(String),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Scalar<T>(pub T);
 
 pub trait Cast<T> {
@@ -97,8 +97,10 @@ pub trait NdArrayLike<T> {
     where Self: Sized, T: 'a {
         NdArrayDataIndexIterator::new(self)
     }
+
+    // shape-related op
     fn reshape<'a, 'b: 'a>(&'b self, shape: NdArrayIndex) -> NdArrayView<'a, T> {
-        let stride = compute_broadcast_strides(self.shape(), self.strides(), &shape).into();
+        let stride = compute_reshape_strides(self.shape(), self.strides(), &shape).into();
         NdArrayView::new(self.data(), self.shape(), shape, stride)
     }
     fn squeeze<'a, 'b: 'a>(&'b self, axis: usize) -> NdArrayView<'a, T> {
@@ -210,7 +212,6 @@ impl <T> NdArray<T> {
             }
         }
     }
-
     pub fn new_shape_with_index(data: Vec<T>, shape: NdArrayIndex) -> Self {
         let stride = compute_stride(&shape);
 
@@ -220,27 +221,25 @@ impl <T> NdArray<T> {
             stride.into(),
         )
     }
-
     pub fn new_shape(data: Vec<T>, shape: Vec<usize>) -> Self {
         Self::new_shape_with_index(
             data,
             shape.into(),
         )
     }
-
     pub fn new(data: Vec<T>) -> Self {
         let shape = vec![data.len()];
         Self::new_shape(data, shape)
     }
 
+    // zero copy shape-related op
     pub fn reshape_array(array: Self, shape: NdArrayIndex) -> Self {
         if array.data.len() != shape.iter().product() {
             panic!("Invalid shape ({:?}) does not match data len ({}).", shape, array.data.len());
         }
-        let stride = compute_stride(&array.shape()).into();
+        let stride = compute_reshape_strides(array.shape(), array.strides(), &shape).into();
         Self::new_shape_with_strides(array.data, shape, stride)
     }
-
     pub fn squeeze_array(array: Self, axis: usize) -> Self {
         match array.shape().get(axis) {
             Some(v) => {
@@ -257,7 +256,6 @@ impl <T> NdArray<T> {
             }
         }
     }
-
     pub fn unsqueeze_array(array: Self, axis: usize) -> Self {
         match axis <= array.shape().len() {
             true => {
@@ -537,7 +535,11 @@ pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<NdArrayIndex, Nd
     Ok(ret.into())
 }
 
-fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize], broadcast_shape: &[usize]) -> Vec<usize> {
+fn compute_reshape_strides(old_shape: &[usize], old_stride: &[usize], reshape: &[usize]) -> Vec<usize> {
+    todo!()
+}
+
+fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize], broadcast_shape: &[usize]) -> Result<NdArrayIndex, NdArrayError> {
     let mut strides: Vec<usize> = Vec::with_capacity(broadcast_shape.len());
 
     let mut old_shape_iter = old_shape.iter().rev();
@@ -556,12 +558,12 @@ fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize], broadcas
             None => 0 // hidden broadcast dimension, you can treat as unsqueeze axis
         }, match b {
             Some(x) => *x,
-            None => panic!(
+            None => return Err(NdArrayError::BroadcastError(format!(
                 "broadcast_shape shorter than old_array.shape, broadcast_shape len: {}, \
                                 old_array.shape len: {}",
                 broadcast_shape.len(),
                 old_shape.len()
-            )
+            )))
         });
 
         if o == 1 || o == 0 && b > o { // this is the broadcast dimension,
@@ -569,13 +571,13 @@ fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize], broadcas
             strides.push(0)
         } else {
             strides.push(*old_stride_iter.next().expect(
-                "Unable to get old stride. old_stride_iter.next() is None."
+                "Unable to get old stride. old_stride_iter.next() is None. This should never happen."
             ))
         }
     }
 
     strides.reverse();
-    strides
+    Ok(strides.into())
 }
 
 
@@ -642,8 +644,8 @@ pub fn broadcast_array<'a, 'b, 'c: 'a, 'd: 'b, L, R>(lhs: &'c impl NdArrayLike<L
             let rhs_shape = broadcast_shape.clone();
             let lhs_shape = broadcast_shape;
 
-            let lhs_strides = compute_broadcast_strides(lhs.shape(), lhs.strides(), &lhs_shape);
-            let rhs_strides = compute_broadcast_strides(rhs.shape(), rhs.strides(), &rhs_shape);
+            let lhs_strides = compute_broadcast_strides(lhs.shape(), lhs.strides(), &lhs_shape)?;
+            let rhs_strides = compute_broadcast_strides(rhs.shape(), rhs.strides(), &rhs_shape)?;
 
             Ok((NdArrayView::new(lhs.data(), lhs.shape(), lhs_shape.into(), lhs_strides.into()),
                 NdArrayView::new(rhs.data(), rhs.shape(), rhs_shape.into(), rhs_strides.into())))
@@ -1370,90 +1372,51 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
 
 
 // Scalar math op
-impl <L, R> Add<Scalar<R>> for Scalar<L>
-where L: Add<Output=L>, R: Into<L> {
-    type Output = Self;
+macro_rules! scalar_op {
+    ($( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+) => {
+        $(
+            impl <L, R> $op_trait<Scalar<R>> for Scalar<L>
+            where L: $op_trait<Output=L>, R: Into<L> {
+                type Output = Self;
 
-    fn add(self, rhs: Scalar<R>) -> Self::Output {
-        Self(self.0 + rhs.0.into())
-    }
+                fn $op_fn(self, rhs: Scalar<R>) -> Self::Output {
+                    Self(self.0 $op rhs.0.into())
+                }
+            }
+        )+
+    };
 }
 
-impl <L, R> Sub<Scalar<R>> for Scalar<L>
-where L: Sub<Output=L>, R: Into<L> {
-    type Output = Self;
-
-    fn sub(self, rhs: Scalar<R>) -> Self {
-        Self(self.0 - rhs.0.into())
-    }
+macro_rules! scalar_assign_op {
+    ($( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+) => {
+        $(
+            impl <L, R> $op_trait<Scalar<R>> for Scalar<L>
+            where L: $op_trait, R: Into<L> {
+                fn $op_fn(&mut self, rhs: Scalar<R>) {
+                    self.0 $op rhs.0.into()
+                }
+            }
+            impl <L, R> $op_trait<&Scalar<R>> for Scalar<L>
+            where L: $op_trait, R: Into<L> + Clone {
+                fn $op_fn(&mut self, rhs: &Scalar<R>) {
+                    let rhs: Scalar<R> = rhs.clone();
+                    *self $op rhs;
+                }
+            }
+        )+
+    };
 }
 
-impl <L, R> Mul<Scalar<R>> for Scalar<L>
-where L: Mul<Output=L>, R: Into<L> {
-    type Output = Self;
-
-    fn mul(self, rhs: Scalar<R>) -> Self::Output {
-        Self(self.0 * rhs.0.into())
-    }
-}
-
-impl <L, R> Div<Scalar<R>> for Scalar<L>
-where L: Div<Output=L>, R: Into<L> {
-    type Output = Self;
-
-    fn div(self, rhs: Scalar<R>) -> Self::Output {
-        Self(self.0 / rhs.0.into())
-    }
-}
-
-impl <L, R> Rem<Scalar<R>> for Scalar<L>
-where L: Rem<Output=L>, R: Into<L> {
-    type Output = Self;
-
-    fn rem(self, rhs: Scalar<R>) -> Self::Output {
-        Self(self.0 % rhs.0.into())
-    }
-}
-
-impl <L, R> AddAssign<Scalar<R>> for Scalar<L>
-where L: AddAssign, R: Into<L> {
-    fn add_assign(&mut self, rhs: Scalar<R>) {
-        self.0 += rhs.0.into()
-    }
-}
-
-impl <L, R> SubAssign<Scalar<R>> for Scalar<L>
-where L: SubAssign, R: Into<L> {
-    fn sub_assign(&mut self, rhs: Scalar<R>) {
-        self.0 -= rhs.0.into()
-    }
-}
-
-impl <L, R> MulAssign<Scalar<R>> for Scalar<L>
-where L: MulAssign, R: Into<L> {
-    fn mul_assign(&mut self, rhs: Scalar<R>) {
-        self.0 *= rhs.0.into()
-    }
-}
-
-impl <L, R> DivAssign<Scalar<R>> for Scalar<L>
-where L: DivAssign, R: Into<L> {
-    fn div_assign(&mut self, rhs: Scalar<R>) {
-        self.0 /= rhs.0.into()
-    }
-}
-
-impl <L, R> RemAssign<Scalar<R>> for Scalar<L>
-where L: RemAssign, R: Into<L> {
-    fn rem_assign(&mut self, rhs: Scalar<R>) {
-        self.0 %= rhs.0.into()
-    }
+scalar_op!{(+, Add, add), (-, Sub, sub), (*, Mul, mul), (/, Div, div), (%, Rem, rem)}
+scalar_assign_op!{
+    (+=, AddAssign, add_assign), (-=, SubAssign, sub_assign), (*=, MulAssign, mul_assign),
+    (/=, DivAssign, div_assign), (%=, RemAssign, rem_assign)
 }
 
 
 // Indexing
 impl <T, Idx> Index<Idx> for NdArray<T>
-where Idx: Into<NdArrayIndex>{
+where Idx: Into<NdArrayIndex> {
     type Output = T;
 
     fn index(&self, index: Idx) -> &Self::Output {
