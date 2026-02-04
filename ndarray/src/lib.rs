@@ -19,12 +19,6 @@ pub struct NdArrayView<'a, T> {
 
 nd_array_index!{8}
 
-macro_rules! index {
-    ( $( $x:expr ),+ $(,)? ) => {
-
-    };
-}
-
 pub struct NdArrayIterator<'a, T: NdArrayLike<DT>, DT> {
     data: &'a T,
     index_iter: NdArrayFastDataIndexIterator<'a>,
@@ -286,7 +280,7 @@ impl <T> NdArray<T> {
     }
 
     pub fn item(self) -> Result<Scalar<T>, NdArrayError> {
-        if self.shape != NdArrayIndex::Dim1([1]) { // todo index![1]
+        if self.shape != index![1] {
             return Err(NdArrayError::InvalidShapeError(format!(
                 "shape must be 1 dimension 1 element array, but got {:?}", self.shape
             )))
@@ -1290,11 +1284,11 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
         assert_eq!(ret.len(), 1);
         NdArray::new(ret)
     } else if lhs.shape().len() == 1 && rhs.shape().len() > 1 {
-        let ret = matmul(&lhs.reshape(NdArrayIndex::Dim2([1, lhs.shape()[0]])), rhs); // todo index![1, lhs.shape()[0]]
+        let ret = matmul(&lhs.reshape(index![1, lhs.shape()[0]]), rhs);
         let axis = ret.shape().len() - 2;
         NdArray::squeeze_array(ret, axis)
     } else if lhs.shape().len() > 1 && rhs.shape().len() == 1 {
-        let ret = matmul(lhs, &rhs.reshape(NdArrayIndex::Dim2([rhs.shape()[0], 1]))); // todo index![rhs.shape()[0], 1]
+        let ret = matmul(lhs, &rhs.reshape(index![rhs.shape()[0], 1]));
         let axis = ret.shape().len() - 1;
         NdArray::squeeze_array(ret, axis)
     } else if lhs.shape().len() > 1 && rhs.shape().len() > 1 {
@@ -1601,7 +1595,7 @@ impl <T: Clone> From<Vec<T>> for NdArray<T> {
 
 impl <T> From<Scalar<T>> for NdArray<T> {
     fn from(data: Scalar<T>) -> Self {
-        NdArray::new_shape_with_strides(Box::new([data.0]), NdArrayIndex::Dim1([1]), NdArrayIndex::Dim1([1])) // todo index![1]
+        NdArray::new_shape_with_strides(Box::new([data.0]), index![1], index![1])
     }
 }
 

@@ -12,6 +12,9 @@ pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
     let mut from_vec_match_arms = quote! {};
     let mut deref_match_arms = quote! {};
     let mut zeros_match_arms = quote! {};
+    let mut index_macro_arms = quote! {};
+
+    let d = quote!( $ );
 
     for i in 1..=max_dim {
         let variant_name = format_ident!("Dim{}", i);
@@ -42,7 +45,14 @@ pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
 
         zeros_match_arms.extend(quote! {
             #i => NdArrayIndex::#variant_name([0; #i]),
-        })
+        });
+
+        let idents: Vec<_> = (1..=i).map(|n| format_ident!("x{}", n)).collect();
+        index_macro_arms.extend(quote! {
+            ( #( #d #idents:expr ),* $(,)? ) => {
+                NdArrayIndex::#variant_name([ #( #d #idents ),* ])
+            };
+        });
     }
 
     TokenStream::from(quote! {
@@ -99,6 +109,13 @@ pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
                     _ => NdArrayIndex::DyDim(vec![0; len]),
                 }
             }
+        }
+
+        macro_rules! index {
+            #index_macro_arms
+            ( $( $x:expr ),+ $(,)? ) => {
+                NdArrayIndex::DyDim(vec![$($x),+])
+            };
         }
     })
 }
