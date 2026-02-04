@@ -926,7 +926,7 @@ macro_rules! assign_op {
 
                     self.contiguous_self();
 
-                    let iter: Vec<Vec<usize>> = self.iter_index().collect();
+                    let iter: Vec<NdArrayIndex> = self.iter_index().collect();
                     for indices in iter {
                         let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
                         self.data[self_index] $op rhs.data()[rhs_index].clone().into();
@@ -969,7 +969,7 @@ macro_rules! ref_assign_op {
 
                     self.contiguous_self();
 
-                    let iter: Vec<Vec<usize>> = self.iter_index().collect();
+                    let iter: Vec<NdArrayIndex> = self.iter_index().collect();
                     for indices in iter {
                         let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
                         self.data[self_index] $op rhs.data()[rhs_index].clone().into();
@@ -1329,15 +1329,15 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
         for batch_size_index in IndexIterator::iter_shape(&broadcast_batch_shape) {
             for i in 0..m {
                 for j in 0..n {
-                    let mut data_index = batch_size_index.clone();
+                    let mut data_index = batch_size_index.to_vec();
                     data_index.push(i);
                     data_index.push(j);
 
                     let mut tmp_ret: Vec<L> = Vec::with_capacity(1);
 
                     for k in 0..p {
-                        let mut lhs_index = batch_size_index.clone();
-                        let mut rhs_index = batch_size_index.clone();
+                        let mut lhs_index = batch_size_index.to_vec();
+                        let mut rhs_index = batch_size_index.to_vec();
 
                         lhs_index.push(i);
                         lhs_index.push(k);
@@ -1477,7 +1477,7 @@ impl <'a, T: NdArrayLike<DT>, DT: 'a> Iterator for NdArrayIterator<'a, T, DT> {
 }
 
 impl <'a> Iterator for NdArrayDataIndexIterator<'a> {
-    type Item = Vec<usize>;
+    type Item = NdArrayIndex;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.iter.next() {
@@ -1544,14 +1544,14 @@ impl <'a> Iterator for NdArrayFastDataIndexIterator<'a> {
 }
 
 impl <'a> Iterator for IndexIterator<'a> {
-    type Item = Vec<usize>;
+    type Item = NdArrayIndex;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.has_done {
             return None;
         }
 
-        let index = self.index.to_vec();
+        let index = self.index.clone();
 
         increase(&mut self.index, &self.data_shape, &mut self.axis_counter, &mut self.has_done);
 
