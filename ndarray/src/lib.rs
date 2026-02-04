@@ -1,8 +1,8 @@
+use ndarray_marco::nd_array_index;
 use std::cmp::max;
 use std::iter::zip;
 use std::marker::PhantomData;
-use std::ops::{Add, AddAssign, Div, DivAssign, Index, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign, Deref, DerefMut};
-use paste::paste;
+use std::ops::{Add, AddAssign, Deref, DerefMut, Div, DivAssign, Index, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
 
 #[derive(Debug, PartialEq)]
 pub struct NdArray<T> {
@@ -17,95 +17,13 @@ pub struct NdArrayView<'a, T> {
     strides: NdArrayIndex,
 }
 
-macro_rules! impl_nd_array_index {
-    ( $( $dim:literal ),+ ) => {
-        paste! {
-            #[derive(Debug, Clone, PartialEq)]
-            pub enum NdArrayIndex {
-                $(
-                    [<Dim $dim>]([usize; $dim]),
-                )+
-                DyDim(Vec<usize>),
-            }
+nd_array_index!{8}
 
-            impl From<&[usize]> for NdArrayIndex {
-                fn from(value: &[usize]) -> Self {
-                    match value.len() {
-                        0 => panic!("zero sized index is not allowed."),
-                        $(
-                            $dim => {
-                                let mut v = [0; $dim];
-                                v.copy_from_slice(value);
-                                NdArrayIndex::[<Dim $dim>](v)
-                            }
-                        )+
-                        _ => NdArrayIndex::DyDim(value.to_vec()),
-                    }
-                }
-            }
+macro_rules! index {
+    ( $( $x:expr ),+ $(,)? ) => {
 
-            impl From<Vec<usize>> for NdArrayIndex {
-                fn from(value: Vec<usize>) -> Self {
-                    match value.len() {
-                        0 => panic!("zero sized index is not allowed."),
-                        $(
-                            $dim => {
-                                let mut v = [0; $dim];
-                                v.copy_from_slice(value.as_slice());
-                                NdArrayIndex::[<Dim $dim>](v)
-                            }
-                        )+
-                        _ => NdArrayIndex::DyDim(value),
-                    }
-                }
-            }
-
-            impl Deref for NdArrayIndex {
-                type Target = [usize];
-
-                fn deref(&self) -> &Self::Target {
-                    match self {
-                        $(
-                            NdArrayIndex::[<Dim $dim>](v) => v,
-                        )+
-                        NdArrayIndex::DyDim(v) => &v,
-                    }
-                }
-            }
-
-            impl DerefMut for NdArrayIndex {
-                fn deref_mut(&mut self) -> &mut Self::Target {
-                    match self {
-                        $(
-                            NdArrayIndex::[<Dim $dim>](v) => v,
-                        )+
-                        NdArrayIndex::DyDim(v) => v,
-                    }
-                }
-            }
-
-            impl NdArrayIndex {
-                pub fn zeros(len: usize) -> Self {
-                    match len {
-                        0 => panic!("zero sized index is not allowed."),
-                        $(
-                            $dim => NdArrayIndex::[<Dim $dim>]([0; $dim]),
-                        )+
-                        _ => NdArrayIndex::DyDim(vec![0; len]),
-                    }
-                }
-            }
-        }
     };
 }
-
-impl_nd_array_index!{1, 2, 3, 4, 5, 6, 7, 8}
-
-// macro_rules! index {
-//     ( $( $x:expr ),+ $(,)? ) => {
-//
-//     };
-// }
 
 pub struct NdArrayIterator<'a, T: NdArrayLike<DT>, DT> {
     data: &'a T,

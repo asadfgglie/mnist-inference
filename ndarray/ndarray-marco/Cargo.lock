@@ -3,13 +3,6 @@
 version = 4
 
 [[package]]
-name = "ndarray"
-version = "0.1.0"
-dependencies = [
- "ndarray-marco",
-]
-
-[[package]]
 name = "ndarray-marco"
 version = "0.1.0"
 dependencies = [
