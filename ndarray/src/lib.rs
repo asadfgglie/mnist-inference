@@ -1,8 +1,8 @@
-use ndarray_marco::nd_array_index;
 use std::cmp::max;
 use std::iter::zip;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Deref, DerefMut, Div, DivAssign, Index, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
+use ndarray_marco::nd_array_index;
 
 #[derive(Debug, PartialEq)]
 pub struct NdArray<T> {
@@ -366,13 +366,11 @@ impl <'a> NdArrayFastDataIndexIterator<'a> {
 
 impl <'a> IndexIterator<'a> {
     pub fn iter_shape<'b: 'a>(shape: &'b [usize]) -> Self {
-        let rank = shape.len();
-
         Self {
-            data_shape: shape,
-            index: NdArrayIndex::zeros(rank),
-            axis_counter: rank - 1,
+            index: NdArrayIndex::zeros(shape.len()),
+            axis_counter: shape.len() - 1,
             has_done: false,
+            data_shape: shape,
         }
     }
 }
@@ -501,7 +499,7 @@ fn compute_stride(shape: &[usize]) -> Vec<usize> {
 /// let result = broadcast_shapes(&shape7, &shape8).unwrap();
 /// assert_eq!(result, vec![4]);
 /// ```
-pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<Vec<usize>, NdArrayError> {
+pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<NdArrayIndex, NdArrayError> {
     let longer = if lhs.len() > rhs.len() { lhs } else { rhs };
     let shorter = if lhs.len() > rhs.len() { rhs } else { lhs };
 
@@ -536,7 +534,7 @@ pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<Vec<usize>, NdAr
     };
 
     ret.reverse();
-    Ok(ret)
+    Ok(ret.into())
 }
 
 fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize], broadcast_shape: &[usize]) -> Vec<usize> {
@@ -867,7 +865,7 @@ macro_rules! ref_view_op {
                         data.push(l $op r.into())
                     }
 
-                    Self::Output::new_shape_with_strides(data.into_boxed_slice(), lhs.shape, lhs.strides)
+                    Self::Output::new_shape_with_index(data, lhs.shape)
                 }
             }
         )+
@@ -1294,8 +1292,8 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
     } else if lhs.shape().len() > 1 && rhs.shape().len() > 1 {
         let shape_split = |shape: &[usize]| {
             match shape.len() > 2 {
-                true => (shape[0..shape.len() - 2].to_vec(), shape[shape.len() - 2..].to_vec()),
-                false => (Vec::new(), shape.to_vec())
+                true => (shape[0..shape.len() - 2].into(), shape[shape.len() - 2..].into()),
+                false => (NdArrayIndex::Dim0([]), <&[usize] as Into<NdArrayIndex>>::into(shape))
             }
         };
         let ((lhs_batch_shape, lhs_data_shape),
@@ -1314,12 +1312,12 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
             Err(e) => panic!("{e:?}")
         };
 
-        let lhs = lhs.reshape([broadcast_batch_shape.clone(), lhs_data_shape].concat().into());
-        let rhs = rhs.reshape([broadcast_batch_shape.clone(), rhs_data_shape].concat().into());
+        let lhs = lhs.reshape(broadcast_batch_shape.clone().concat(lhs_data_shape.into()));
+        let rhs = rhs.reshape(broadcast_batch_shape.clone().concat(rhs_data_shape.into()));
         // lhs: (broadcast_batch_shape, M, P)
         // rhs: (broadcast_batch_shape, P, N)
 
-        let mut data_shape = broadcast_batch_shape.clone();
+        let mut data_shape = broadcast_batch_shape.to_vec();
         data_shape.push(m);
         data_shape.push(n);
         let data_shape: NdArrayIndex = data_shape.into();
@@ -1455,7 +1453,7 @@ where L: RemAssign, R: Into<L> {
 
 // Indexing
 impl <T, Idx> Index<Idx> for NdArray<T>
-where Idx: Into<Vec<usize>>{
+where Idx: Into<NdArrayIndex>{
     type Output = T;
 
     fn index(&self, index: Idx) -> &Self::Output {

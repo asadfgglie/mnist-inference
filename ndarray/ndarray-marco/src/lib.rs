@@ -7,16 +7,17 @@ pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
     let max_dim = parse_macro_input!(max_dim as LitInt);
     let max_dim: usize = max_dim.base10_parse().unwrap();
 
-    let mut enum_variants = quote! {};
-    let mut from_slice_match_arms = quote! {};
-    let mut from_vec_match_arms = quote! {};
-    let mut deref_match_arms = quote! {};
-    let mut zeros_match_arms = quote! {};
-    let mut index_macro_arms = quote! {};
+    let mut enum_variants = quote!();
+    let mut from_slice_match_arms = quote!();
+    let mut from_vec_match_arms = quote!{};
+    let mut deref_match_arms = quote!{};
+    let mut zeros_match_arms = quote!{};
+    let mut concat_match_arms = quote!{};
+    let mut index_macro_arms = quote!{};
 
     let d = quote!($);
 
-    for i in 1..=max_dim {
+    for i in 0..=max_dim {
         let variant_name = format_ident!("Dim{}", i);
 
         enum_variants.extend(quote! {
@@ -47,6 +48,16 @@ pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
             #i => NdArrayIndex::#variant_name([0; #i]),
         });
 
+        concat_match_arms.extend(quote! {
+            #i => {
+                let mut v = [0; #i];
+                let (v1, v2) = v.split_at_mut(self.len());
+                v1.copy_from_slice(&self);
+                v2.copy_from_slice(&other);
+                NdArrayIndex::#variant_name(v)
+            },
+        });
+
         let idents: Vec<_> = (1..=i).map(|n| format_ident!("x{}", n)).collect();
         index_macro_arms.extend(quote! {
             ( #( #d #idents:expr ),* $(,)? ) => {
@@ -65,7 +76,6 @@ pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
         impl From<&[usize]> for NdArrayIndex {
             fn from(value: &[usize]) -> Self {
                 match value.len() {
-                    0 => panic!("Zero sized index not allowed"),
                     #from_slice_match_arms
                     _ => NdArrayIndex::DyDim(value.to_vec()),
                 }
@@ -75,7 +85,6 @@ pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
         impl From<Vec<usize>> for NdArrayIndex {
                 fn from(value: Vec<usize>) -> Self {
                     match value.len() {
-                        0 => panic!("zero sized index is not allowed."),
                         #from_vec_match_arms
                         _ => NdArrayIndex::DyDim(value),
                     }
@@ -104,9 +113,19 @@ pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
         impl NdArrayIndex {
             pub fn zeros(len: usize) -> Self {
                 match len {
-                    0 => panic!("zero sized index is not allowed."),
                     #zeros_match_arms
                     _ => NdArrayIndex::DyDim(vec![0; len]),
+                }
+            }
+            pub fn concat(self, other: NdArrayIndex) -> Self {
+                match self.len() + other.len() {
+                    #concat_match_arms
+                    _ =>  {
+                        let mut v = Vec::with_capacity(self.len() + other.len());
+                        v.extend(self.into_iter());
+                        v.extend(other.into_iter());
+                        v.into()
+                    }
                 }
             }
         }
