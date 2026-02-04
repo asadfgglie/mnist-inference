@@ -3,13 +3,6 @@
 version = 4
 
 [[package]]
-name = "mnist-inference"
-version = "0.1.0"
-dependencies = [
- "ndarray",
-]
-
-[[package]]
 name = "ndarray"
 version = "0.1.0"
 dependencies = [
