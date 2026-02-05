@@ -62,6 +62,7 @@ pub struct IndexIterator<'a> {
 pub enum NdArrayError {
     BroadcastError(String),
     ReshapeError(String),
+    IncompatibleReshapeError(String),
     InvalidStridesError(String),
     InvalidShapeError(String),
 }
@@ -236,17 +237,60 @@ impl <T> NdArray<T> {
         let shape = vec![data.len()];
         Self::new_shape(data, shape)
     }
-
-    // zero copy shape-related op
-    pub fn reshape_array(array: Self, shape: NdArrayIndex) -> Self {
-        if array.data.len() != shape.iter().product() {
-            panic!("Invalid shape ({:?}) does not match data len ({}).", shape, array.data.len());
-        }
-        let stride = match compute_reshape_strides(array.shape(), array.strides(), &shape) {
+    pub fn broadcast_array_to(array: Self, shape: NdArrayIndex) -> Self {
+        let stride = match compute_broadcast_strides(array.shape(), array.strides(), &shape) {
             Ok(s) => s,
             Err(e) => panic!("{:?}", e)
         };
         Self::new_shape_with_strides(array.data, shape, stride)
+    }
+
+    pub fn item(self) -> Result<Scalar<T>, NdArrayError> {
+        if self.shape != index![1] {
+            return Err(NdArrayError::InvalidShapeError(format!(
+                "shape must be 1 dimension 1 element array, but got {:?}", self.shape
+            )))
+        }
+        let self_info = format!(
+            "self.shape: {:?}, self.stride: {:?}, self.data.len: {}",
+            self.shape, self.strides, self.data.len()
+        );
+        Ok(self.data.into_vec().pop().unwrap_or_else(|| panic!("self.data seems empty, but this should not happen. {}", self_info)).into())
+    }
+}
+
+impl <T: Clone> NdArray<T> {
+    pub fn contiguous(self) -> Self {
+        if self.is_contiguous() {
+            self
+        } else {
+            let mut data: Vec<T> = Vec::with_capacity(self.shape.iter().product());
+            data.extend(self.into_iter().cloned());
+            Self::new_shape_with_index(data, self.shape.clone())
+        }
+    }
+    pub fn contiguous_self(& mut self) {
+        if !self.is_contiguous() {
+            let mut data: Vec<T> = Vec::with_capacity(self.shape.iter().product());
+            data.extend(self.into_iter().cloned());
+            self.data = data.into_boxed_slice();
+            self.strides = compute_stride(&self.shape);
+        }
+    }
+
+    // shape-related op
+    pub fn reshape_array(array: Self, shape: NdArrayIndex) -> Self {
+        if array.shape().iter().product::<usize>() != shape.iter().product() {
+            panic!("Invalid shape ({:?}) does not match data len ({}).", shape, array.data.len());
+        }
+        match compute_reshape_strides(array.shape(), array.strides(), &shape) {
+            Ok(stride) => Self::new_shape_with_strides(array.data, shape, stride),
+            Err(NdArrayError::IncompatibleReshapeError(_)) => {
+                Self::reshape_array(array.contiguous(), shape)
+            },
+            Err(e) => panic!("{:?}", e)
+        }
+
     }
     pub fn squeeze_array(array: Self, axis: usize) -> Self {
         match array.shape().get(axis) {
@@ -282,47 +326,6 @@ impl <T> NdArray<T> {
             false => {
                 panic!("Index out of bounds, shape: {:?}, axis: {axis}", array.shape())
             }
-        }
-    }
-    pub fn broadcast_array_to(array: Self, shape: NdArrayIndex) -> Self {
-        let stride = match compute_broadcast_strides(array.shape(), array.strides(), &shape) {
-            Ok(s) => s,
-            Err(e) => panic!("{:?}", e)
-        };
-        Self::new_shape_with_strides(array.data, shape, stride)
-    }
-
-    pub fn item(self) -> Result<Scalar<T>, NdArrayError> {
-        if self.shape != index![1] {
-            return Err(NdArrayError::InvalidShapeError(format!(
-                "shape must be 1 dimension 1 element array, but got {:?}", self.shape
-            )))
-        }
-        let self_info = format!(
-            "self.shape: {:?}, self.stride: {:?}, self.data.len: {}",
-            self.shape, self.strides, self.data.len()
-        );
-        Ok(self.data.into_vec().pop().unwrap_or_else(|| panic!("self.data seems empty, but this should not happen. {}", self_info)).into())
-    }
-}
-
-impl <T: Clone> NdArray<T> {
-    pub fn contiguous(self) -> Self {
-        if self.is_contiguous() {
-            self
-        } else {
-            let mut data: Vec<T> = Vec::with_capacity(self.shape.iter().product());
-            data.extend(self.into_iter().cloned());
-            Self::new_shape_with_index(data, self.shape.clone())
-        }
-    }
-
-    pub fn contiguous_self(& mut self) {
-        if !self.is_contiguous() {
-            let mut data: Vec<T> = Vec::with_capacity(self.shape.iter().product());
-            data.extend(self.into_iter().cloned());
-            self.data = data.into_boxed_slice();
-            self.strides = compute_stride(&self.shape);
         }
     }
 }
@@ -617,7 +620,7 @@ fn compute_reshape_strides(old_shape: &[usize], old_stride: &[usize], reshape: &
         return Ok(reshape.into())
     }
 
-    let err = Err(NdArrayError::ReshapeError(format!(
+    let err = Err(NdArrayError::IncompatibleReshapeError(format!(
         "old shape {:?} and shape {:?} isn't compatible. consider contiguous array then reshape again.",
         old_shape, reshape
     )));
