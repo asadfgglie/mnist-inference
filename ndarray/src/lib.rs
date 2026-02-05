@@ -140,6 +140,10 @@ pub trait NdArrayLike<T> {
             }
         }
     }
+    fn broadcast_to<'a, 'b: 'a>(&'b self, shape: &[usize]) -> Result<NdArrayView<'a, T>, NdArrayError> {
+        let stride = compute_broadcast_strides(self.shape(), self.strides(), shape)?;
+        Ok(NdArrayView::new(self.data(), self.shape(), shape.into(), stride))
+    }
 }
 
 impl <T> NdArrayLike<T> for NdArray<T> {
@@ -279,6 +283,13 @@ impl <T> NdArray<T> {
                 panic!("Index out of bounds, shape: {:?}, axis: {axis}", array.shape())
             }
         }
+    }
+    pub fn broadcast_array_to(array: Self, shape: NdArrayIndex) -> Self {
+        let stride = match compute_broadcast_strides(array.shape(), array.strides(), &shape) {
+            Ok(s) => s,
+            Err(e) => panic!("{:?}", e)
+        };
+        Self::new_shape_with_strides(array.data, shape, stride)
     }
 
     pub fn item(self) -> Result<Scalar<T>, NdArrayError> {
@@ -569,7 +580,7 @@ fn compute_shape_block(shape: &[usize], stride: &[usize]) -> Vec<(usize, usize)>
         } else if base_stride == s {
             // contiguous 0 strides => same block with 0 base stride
             current_block.push(d);
-        } else { 
+        } else {
             // s == 0 but base_stride != 0 => meet broadcast axis
             blocks.push((current_block.iter().product(), base_stride));
             current_block.clear();
@@ -1388,7 +1399,7 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
         assert_eq!(ret.len(), 1);
         NdArray::new(ret)
     } else if lhs.shape().len() == 1 && rhs.shape().len() > 1 {
-        let lhs = match lhs.reshape(index![1, lhs.shape()[0]]) {
+        let lhs = match lhs.unsqueeze(0) {
             Ok(l) => l,
             Err(e) => panic!("{e:?}")
         };
@@ -1396,7 +1407,7 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
         let axis = ret.shape().len() - 2;
         NdArray::squeeze_array(ret, axis)
     } else if lhs.shape().len() > 1 && rhs.shape().len() == 1 {
-        let rhs = match rhs.reshape(index![rhs.shape()[0], 1]) {
+        let rhs = match rhs.unsqueeze(1) {
             Ok(r) => r,
             Err(e) => panic!("{e:?}")
         };
@@ -1426,19 +1437,14 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
             Err(e) => panic!("{e:?}")
         };
 
-        let lhs_shape = broadcast_batch_shape.clone().concat(lhs_data_shape);
-        let lhs_stride = match compute_broadcast_strides(lhs.shape(), lhs.strides(), &lhs_shape) {
+        let lhs = match lhs.broadcast_to(&broadcast_batch_shape.clone().concat(lhs_data_shape)) {
             Ok(x) => x,
             Err(e) => panic!("{e:?}")
         };
-        let lhs = NdArrayView::new(lhs.data(), lhs.shape(), lhs_shape, lhs_stride);
-
-        let rhs_shape = broadcast_batch_shape.clone().concat(rhs_data_shape);
-        let rhs_stride = match compute_broadcast_strides(rhs.shape(), rhs.strides(), &rhs_shape) {
+        let rhs = match rhs.broadcast_to(&broadcast_batch_shape.clone().concat(rhs_data_shape)) {
             Ok(x) => x,
             Err(e) => panic!("{e:?}")
         };
-        let rhs = NdArrayView::new(rhs.data(), rhs.shape(), rhs_shape, rhs_stride);
         // lhs: (broadcast_batch_shape, M, P)
         // rhs: (broadcast_batch_shape, P, N)
 
