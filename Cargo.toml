@@ -6,3 +6,9 @@ edition = "2024"
 [dependencies]
 ndarray = { path = "./ndarray" }
 
+[workspace]
+members = [
+    ".",
+    "ndarray",
+    "ndarray/ndarray-marco",
+]

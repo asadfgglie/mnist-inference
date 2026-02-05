@@ -1,4 +1,4 @@
-use std::cmp::max;
+use std::cmp::{max, PartialEq};
 use std::iter::zip;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Deref, DerefMut, Div, DivAssign, Index, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
@@ -61,6 +61,7 @@ pub struct IndexIterator<'a> {
 #[derive(Debug, PartialEq)]
 pub enum NdArrayError {
     BroadcastError(String),
+    ReshapeError(String),
     InvalidStridesError(String),
     InvalidShapeError(String),
 }
@@ -99,15 +100,15 @@ pub trait NdArrayLike<T> {
     }
 
     // shape-related op
-    fn reshape<'a, 'b: 'a>(&'b self, shape: NdArrayIndex) -> NdArrayView<'a, T> {
-        let stride = compute_reshape_strides(self.shape(), self.strides(), &shape).into();
-        NdArrayView::new(self.data(), self.shape(), shape, stride)
+    fn reshape<'a, 'b: 'a>(&'b self, shape: NdArrayIndex) -> Result<NdArrayView<'a, T>, NdArrayError> {
+        let stride = compute_reshape_strides(self.shape(), self.strides(), &shape)?;
+        Ok(NdArrayView::new(self.data(), self.shape(), shape, stride))
     }
-    fn squeeze<'a, 'b: 'a>(&'b self, axis: usize) -> NdArrayView<'a, T> {
+    fn squeeze<'a, 'b: 'a>(&'b self, axis: usize) -> Result<NdArrayView<'a, T>, NdArrayError> {
         match self.shape().get(axis) {
             Some(v) => {
                 if *v != 1 {
-                    self.to_view()
+                    Ok(self.to_view())
                 } else {
                     let mut shape = self.shape().to_vec();
                     shape.remove(axis);
@@ -115,11 +116,11 @@ pub trait NdArrayLike<T> {
                 }
             },
             None => {
-                panic!("Index out of bounds, shape: {:?}, axis: {axis}", self.shape())
+                Err(NdArrayError::ReshapeError(format!("Index out of bounds, shape: {:?}, axis: {axis}", self.shape())))
             }
         }
     }
-    fn unsqueeze<'a, 'b: 'a>(&'b self, axis: usize) -> NdArrayView<'a, T> {
+    fn unsqueeze<'a, 'b: 'a>(&'b self, axis: usize) -> Result<NdArrayView<'a, T>, NdArrayError> {
         match axis <= self.shape().len() {
             true => {
                 let mut shape = Vec::with_capacity(self.shape().len() + 1);
@@ -135,7 +136,7 @@ pub trait NdArrayLike<T> {
                 self.reshape(shape.into())
             },
             false => {
-                panic!("Index out of bounds, shape: {:?}, axis: {axis}", self.shape())
+                Err(NdArrayError::ReshapeError(format!("Index out of bounds, shape: {:?}, axis: {axis}", self.shape())))
             }
         }
     }
@@ -199,14 +200,14 @@ impl <T> NdArray<T> {
         match validate_contiguous_stride(&shape, &strides) {
             Ok(_) => Self {
                 data,
-                shape: shape.into(),
-                strides: strides.into(),
+                shape,
+                strides,
             },
             Err(_) => match validate_view(&shape, &shape, &strides) {
                 Ok(_) => Self {
                     data,
-                    shape: shape.into(),
-                    strides: strides.into(),
+                    shape,
+                    strides,
                 },
                 Err(e) => panic!("{:?}", e)
             }
@@ -218,7 +219,7 @@ impl <T> NdArray<T> {
         Self::new_shape_with_strides(
             data.into_boxed_slice(),
             shape,
-            stride.into(),
+            stride,
         )
     }
     pub fn new_shape(data: Vec<T>, shape: Vec<usize>) -> Self {
@@ -237,7 +238,10 @@ impl <T> NdArray<T> {
         if array.data.len() != shape.iter().product() {
             panic!("Invalid shape ({:?}) does not match data len ({}).", shape, array.data.len());
         }
-        let stride = compute_reshape_strides(array.shape(), array.strides(), &shape).into();
+        let stride = match compute_reshape_strides(array.shape(), array.strides(), &shape) {
+            Ok(s) => s,
+            Err(e) => panic!("{:?}", e)
+        };
         Self::new_shape_with_strides(array.data, shape, stride)
     }
     pub fn squeeze_array(array: Self, axis: usize) -> Self {
@@ -287,9 +291,7 @@ impl <T> NdArray<T> {
             "self.shape: {:?}, self.stride: {:?}, self.data.len: {}",
             self.shape, self.strides, self.data.len()
         );
-        Ok(self.data.into_vec().pop().expect(&format!(
-            "self.data seems empty, but this should not happen. {}", self_info
-        )).into())
+        Ok(self.data.into_vec().pop().unwrap_or_else(|| panic!("self.data seems empty, but this should not happen. {}", self_info)).into())
     }
 }
 
@@ -309,7 +311,7 @@ impl <T: Clone> NdArray<T> {
             let mut data: Vec<T> = Vec::with_capacity(self.shape.iter().product());
             data.extend(self.into_iter().cloned());
             self.data = data.into_boxed_slice();
-            self.strides = compute_stride(&self.shape).into();
+            self.strides = compute_stride(&self.shape);
         }
     }
 }
@@ -400,7 +402,7 @@ fn validate_view(old_shape: &[usize], view_shape: &[usize], view_stride: &[usize
         loop {
             let (o, v, s) =
                 (old_shape_iter.next(), view_shape_iter.next(), view_stride_iter.next());
-            if o == None && v == None && s == None {
+            if o.is_none() && v.is_none() && s.is_none() {
                 break;
             }
 
@@ -455,8 +457,8 @@ fn validate_contiguous_stride(shape: &[usize], strides: &[usize]) -> Result<(), 
 }
 
 /// base on shape, return row-major contiguous stride
-fn compute_stride(shape: &[usize]) -> Vec<usize> {
-    shape.into_iter()
+fn compute_stride(shape: &[usize]) -> NdArrayIndex {
+    shape.iter()
         .rev()
         .scan(1, |acc, x| {
             let tmp = *acc;
@@ -466,18 +468,20 @@ fn compute_stride(shape: &[usize]) -> Vec<usize> {
         .collect::<Vec<usize>>()
         .into_iter()
         .rev()
-        .collect()
+        .collect::<Vec<usize>>()
+        .into()
 }
 
 /// ```rust
 /// use ndarray::broadcast_shapes;
 /// use ndarray::NdArrayError;
+/// use ndarray::index;
 ///
 /// // Example 1: Broadcasting compatible shapes
 /// let shape1 = vec![2, 3, 4];
 /// let shape2 = vec![3, 1];
 /// let result = broadcast_shapes(&shape1, &shape2).unwrap();
-/// assert_eq!(result, vec![2, 3, 4]);
+/// assert_eq!(result, index![2, 3, 4]);
 ///
 /// // Example 2: Incompatible shapes
 /// let shape3 = vec![2, 3];
@@ -489,13 +493,13 @@ fn compute_stride(shape: &[usize]) -> Vec<usize> {
 /// let shape5 = vec![2, 3, 4, 5];
 /// let shape6 = vec![2, 3, 1, 5];
 /// let result = broadcast_shapes(&shape5, &shape6).unwrap();
-/// assert_eq!(result, vec![2, 3, 4, 5]);
+/// assert_eq!(result, index![2, 3, 4, 5]);
 ///
 /// // Example 4
 /// let shape7 = vec![1];
 /// let shape8 = vec![4];
 /// let result = broadcast_shapes(&shape7, &shape8).unwrap();
-/// assert_eq!(result, vec![4]);
+/// assert_eq!(result, index![4]);
 /// ```
 pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<NdArrayIndex, NdArrayError> {
     let longer = if lhs.len() > rhs.len() { lhs } else { rhs };
@@ -508,7 +512,7 @@ pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<NdArrayIndex, Nd
     loop {
         let (l, r) = (longer.next(), shorter.next());
 
-        if l == None && r == None {
+        if l.is_none() && r.is_none() {
             break;
         }
 
@@ -535,8 +539,99 @@ pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<NdArrayIndex, Nd
     Ok(ret.into())
 }
 
-fn compute_reshape_strides(old_shape: &[usize], old_stride: &[usize], reshape: &[usize]) -> Vec<usize> {
-    todo!()
+
+fn compute_shape_block(shape: &[usize], stride: &[usize]) -> Vec<(usize, usize)> {
+    assert_eq!(shape.len(), stride.len());
+    assert_ne!(shape.len(), 0);
+    let mut blocks: Vec<(usize, usize)> = Vec::with_capacity(shape.len());
+    let mut current_block: Vec<usize> = Vec::with_capacity(shape.len());
+    let mut base_stride: usize = 0;
+    for (axis, (d, s)) in zip(shape.iter(), stride.iter()).enumerate().rev() {
+        if current_block.is_empty() {
+            if *s != 0 {
+                base_stride = *s;
+                current_block.push(*d);
+            } else {
+                // a broadcast axis can't be a shape block
+                continue;
+            }
+        } else {
+            let next_axis = axis + 1;
+            if *s != shape[next_axis] * stride[next_axis] || *s == 0 {
+                // shape block bound found
+                blocks.push((current_block.iter().product(), base_stride));
+                current_block.clear();
+                base_stride = *s;
+            }
+            current_block.push(*d);
+        }
+    }
+    if !current_block.is_empty() {
+        blocks.push((current_block.iter().product(), base_stride));
+    }
+    blocks
+}
+
+fn compute_reshape_strides(old_shape: &[usize], old_stride: &[usize], reshape: &[usize]) -> Result<NdArrayIndex, NdArrayError> {
+    if old_shape.is_empty() {
+        return Err(NdArrayError::InvalidShapeError("shape is empty!".into()))
+    }
+
+    if old_shape.len() != old_stride.len() {
+        return Err(NdArrayError::InvalidShapeError(format!(
+            "Shape len and stride len doesn't match. shape len: {}, stride len: {}",
+            old_shape.len(), old_stride.len()
+        )))
+    }
+
+    if old_shape.iter().product::<usize>() != reshape.iter().product() {
+        return Err(NdArrayError::ReshapeError(format!(
+            "Unable turn shape {:?} ({}) into new shape {:?} ({}) since element number mismatch.",
+            old_shape, old_shape.iter().product::<usize>(), reshape, reshape.iter().product::<usize>()
+        )))
+    }
+
+    if old_shape.iter().product::<usize>() == 0 {
+        return Ok(reshape.into())
+    }
+
+    let err = Err(NdArrayError::ReshapeError(format!(
+        "old shape {:?} and shape {:?} isn't compatible. consider contiguous array then reshape again.",
+        old_shape, reshape
+    )));
+    let mut reshape_iter = reshape.iter().rev().peekable();
+    let mut stride = Vec::with_capacity(reshape.len());
+    for (block_elements, base_stride) in compute_shape_block(old_shape, old_stride) {
+        stride.push(base_stride);
+
+        let mut current_elements = match reshape_iter.next() {
+            Some(&x) => x,
+            None => return err
+        };
+        let mut next_d = current_elements;
+
+        while current_elements <= block_elements {
+            let d = match reshape_iter.peek() {
+                Some(&&x) => x,
+                None => {
+                    if current_elements == block_elements {
+                        break;
+                    }
+                    return err
+                }
+            };
+            current_elements *= d;
+
+            if current_elements <= block_elements {
+                stride.push(next_d * stride.last().expect("this shouldn't happen"));
+                next_d = d;
+                reshape_iter.next().expect("this shouldn't happen");
+            }
+        }
+    }
+
+    stride.reverse();
+    Ok(stride.into())
 }
 
 fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize], broadcast_shape: &[usize]) -> Result<NdArrayIndex, NdArrayError> {
@@ -549,7 +644,7 @@ fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize], broadcas
     loop {
         let (o, b) = (old_shape_iter.next(), broadcast_shape_iter.next());
 
-        if o == None && b == None {
+        if o.is_none() && b.is_none() {
             break;
         }
 
@@ -639,7 +734,7 @@ fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize], broadcas
 ///   modifications during stride computation.
 pub fn broadcast_array<'a, 'b, 'c: 'a, 'd: 'b, L, R>(lhs: &'c impl NdArrayLike<L>, rhs: &'d impl NdArrayLike<R>)
     -> Result<(NdArrayView<'a, L>, NdArrayView<'b, R>), NdArrayError> {
-    match broadcast_shapes(&lhs.shape(), &rhs.shape()) {
+    match broadcast_shapes(lhs.shape(), rhs.shape()) {
         Ok(broadcast_shape) => {
             let rhs_shape = broadcast_shape.clone();
             let lhs_shape = broadcast_shape;
@@ -647,8 +742,8 @@ pub fn broadcast_array<'a, 'b, 'c: 'a, 'd: 'b, L, R>(lhs: &'c impl NdArrayLike<L
             let lhs_strides = compute_broadcast_strides(lhs.shape(), lhs.strides(), &lhs_shape)?;
             let rhs_strides = compute_broadcast_strides(rhs.shape(), rhs.strides(), &rhs_shape)?;
 
-            Ok((NdArrayView::new(lhs.data(), lhs.shape(), lhs_shape.into(), lhs_strides.into()),
-                NdArrayView::new(rhs.data(), rhs.shape(), rhs_shape.into(), rhs_strides.into())))
+            Ok((NdArrayView::new(lhs.data(), lhs.shape(), lhs_shape, lhs_strides),
+                NdArrayView::new(rhs.data(), rhs.shape(), rhs_shape, rhs_strides)))
         }
         Err(e) => Err(e)
     }
@@ -888,17 +983,15 @@ macro_rules! general_op {
 /// basic `&NdArray`/`NdArray` assign (in-place) operation with `NdArray`
 /// ```
 /// use ndarray::*;
-/// fn main() {
-///     let mut a: NdArray<f32> = NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast();
-///     a += NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]);
-///     assert_eq!(a, NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast() * Scalar(2i8));
+/// let mut a: NdArray<f32> = NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast();
+/// a += NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]);
+/// assert_eq!(a, NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast() * Scalar(2i8));
 ///
-///     a /= Scalar(2i8);
-///     assert_eq!(a, NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast());
+/// a /= Scalar(2i8);
+/// assert_eq!(a, NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]).cast());
 ///
-///     a -= NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]);
-///     assert_eq!(a, NdArray::new_shape(vec![0.0; 9], vec![3,3]));
-/// }
+/// a -= NdArray::new_shape(Vec::from_iter((1i8..10i8).into_iter()), vec![3,3]);
+/// assert_eq!(a, NdArray::new_shape(vec![0.0; 9], vec![3,3]));
 /// ```
 macro_rules! assign_op {
     ($( ( $op:tt, $op_trait:ident, $op_fn:ident ) ),+) => {
@@ -1284,11 +1377,19 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
         assert_eq!(ret.len(), 1);
         NdArray::new(ret)
     } else if lhs.shape().len() == 1 && rhs.shape().len() > 1 {
-        let ret = matmul(&lhs.reshape(index![1, lhs.shape()[0]]), rhs);
+        let lhs = match lhs.reshape(index![1, lhs.shape()[0]]) {
+            Ok(l) => l,
+            Err(e) => panic!("{e:?}")
+        };
+        let ret = matmul(&lhs, rhs);
         let axis = ret.shape().len() - 2;
         NdArray::squeeze_array(ret, axis)
     } else if lhs.shape().len() > 1 && rhs.shape().len() == 1 {
-        let ret = matmul(lhs, &rhs.reshape(index![rhs.shape()[0], 1]));
+        let rhs = match rhs.reshape(index![rhs.shape()[0], 1]) {
+            Ok(r) => r,
+            Err(e) => panic!("{e:?}")
+        };
+        let ret = matmul(lhs, &rhs);
         let axis = ret.shape().len() - 1;
         NdArray::squeeze_array(ret, axis)
     } else if lhs.shape().len() > 1 && rhs.shape().len() > 1 {
@@ -1314,8 +1415,19 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
             Err(e) => panic!("{e:?}")
         };
 
-        let lhs = lhs.reshape(broadcast_batch_shape.clone().concat(lhs_data_shape.into()));
-        let rhs = rhs.reshape(broadcast_batch_shape.clone().concat(rhs_data_shape.into()));
+        let lhs_shape = broadcast_batch_shape.clone().concat(lhs_data_shape);
+        let lhs_stride = match compute_broadcast_strides(lhs.shape(), lhs.strides(), &lhs_shape) {
+            Ok(x) => x,
+            Err(e) => panic!("{e:?}")
+        };
+        let lhs = NdArrayView::new(lhs.data(), lhs.shape(), lhs_shape, lhs_stride);
+
+        let rhs_shape = broadcast_batch_shape.clone().concat(rhs_data_shape);
+        let rhs_stride = match compute_broadcast_strides(rhs.shape(), rhs.strides(), &rhs_shape) {
+            Ok(x) => x,
+            Err(e) => panic!("{e:?}")
+        };
+        let rhs = NdArrayView::new(rhs.data(), rhs.shape(), rhs_shape, rhs_stride);
         // lhs: (broadcast_batch_shape, M, P)
         // rhs: (broadcast_batch_shape, P, N)
 
@@ -1324,7 +1436,7 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
         data_shape.push(n);
         let data_shape: NdArrayIndex = data_shape.into();
         let mut data: Vec<L> = Vec::with_capacity(data_shape.iter().product());
-        let data_stride: NdArrayIndex = compute_stride(&data_shape).into();
+        let data_stride: NdArrayIndex = compute_stride(&data_shape);
 
         for batch_size_index in IndexIterator::iter_shape(&broadcast_batch_shape) {
             for i in 0..m {
@@ -1498,7 +1610,7 @@ impl <'a> Iterator for NdArrayFastDataIndexIterator<'a> {
 
         let ret = Some(ret);
 
-        increase(&mut self.index, &self.data_shape, &mut self.axis_counter, &mut self.has_done);
+        increase(&mut self.index, self.data_shape, &mut self.axis_counter, &mut self.has_done);
 
         ret
     }
@@ -1514,7 +1626,7 @@ impl <'a> Iterator for IndexIterator<'a> {
 
         let index = self.index.clone();
 
-        increase(&mut self.index, &self.data_shape, &mut self.axis_counter, &mut self.has_done);
+        increase(&mut self.index, self.data_shape, &mut self.axis_counter, &mut self.has_done);
 
         Some(index)
     }
@@ -1609,3 +1721,7 @@ impl <T: Clone> From<NdArrayView<'_, T>> for NdArray<T> {
         Self::new_shape_with_index(data, value.shape)
     }
 }
+
+
+#[cfg(test)]
+mod tests;

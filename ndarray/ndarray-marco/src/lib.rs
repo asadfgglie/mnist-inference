@@ -9,11 +9,13 @@ pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
 
     let mut enum_variants = quote!();
     let mut from_slice_match_arms = quote!();
-    let mut from_vec_match_arms = quote!{};
-    let mut deref_match_arms = quote!{};
-    let mut zeros_match_arms = quote!{};
-    let mut concat_match_arms = quote!{};
-    let mut index_macro_arms = quote!{};
+    let mut from_vec_match_arms = quote!();
+    let mut deref_match_arms = quote!();
+    let mut partial_eq_match_arms1 = quote!();
+    let mut partial_eq_match_arms2 = quote!();
+    let mut zeros_match_arms = quote!();
+    let mut concat_match_arms = quote!();
+    let mut index_macro_arms = quote!();
 
     let d = quote!($);
 
@@ -42,6 +44,14 @@ pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
 
         deref_match_arms.extend(quote! {
             NdArrayIndex::#variant_name(v) => v,
+        });
+
+        partial_eq_match_arms1.extend(quote! {
+            NdArrayIndex::#variant_name(v) => v == other,
+        });
+
+        partial_eq_match_arms2.extend(quote! {
+            NdArrayIndex::#variant_name(v) => v == self,
         });
 
         zeros_match_arms.extend(quote! {
@@ -106,6 +116,32 @@ pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
                 match self {
                     #deref_match_arms
                     NdArrayIndex::DyDim(v) => v,
+                }
+            }
+        }
+
+        impl PartialEq<&[usize]> for NdArrayIndex {
+            fn eq(&self, other: &&[usize]) -> bool {
+                if self.len() != other.len() {
+                    false
+                } else {
+                    match self {
+                        #partial_eq_match_arms1
+                        NdArrayIndex::DyDim(v) => v == other,
+                    }
+                }
+            }
+        }
+
+        impl PartialEq<NdArrayIndex> for &[usize] {
+            fn eq(&self, other: &NdArrayIndex) -> bool {
+                if self.len() != other.len() {
+                    false
+                } else {
+                    match other {
+                        #partial_eq_match_arms2
+                        NdArrayIndex::DyDim(v) => v == self,
+                    }
                 }
             }
         }
