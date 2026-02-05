@@ -545,25 +545,36 @@ fn compute_shape_block(shape: &[usize], stride: &[usize]) -> Vec<(usize, usize)>
     assert_ne!(shape.len(), 0);
     let mut blocks: Vec<(usize, usize)> = Vec::with_capacity(shape.len());
     let mut current_block: Vec<usize> = Vec::with_capacity(shape.len());
-    let mut base_stride: usize = 0;
-    for (axis, (d, s)) in zip(shape.iter(), stride.iter()).enumerate().rev() {
+    let mut base_stride: usize = *stride.first().unwrap();
+    for (axis, (&d, &s)) in zip(shape.iter(), stride.iter()).enumerate().rev() {
         if current_block.is_empty() {
-            if *s != 0 {
-                base_stride = *s;
-                current_block.push(*d);
+            if s != 0 {
+                base_stride = s;
+                current_block.push(d);
             } else {
-                // a broadcast axis can't be a shape block
-                continue;
+                // a broadcast axis itself is a total d elements, 0 stride block
+                // so contiguous 0 stride => same block with 0 base stride
+                base_stride = s;
+                current_block.push(d);
             }
-        } else {
+        } else if s != 0 {
             let next_axis = axis + 1;
-            if *s != shape[next_axis] * stride[next_axis] || *s == 0 {
+            if s != shape[next_axis] * stride[next_axis] {
                 // shape block bound found
                 blocks.push((current_block.iter().product(), base_stride));
                 current_block.clear();
-                base_stride = *s;
+                base_stride = s;
             }
-            current_block.push(*d);
+            current_block.push(d);
+        } else if base_stride == s {
+            // contiguous 0 strides => same block with 0 base stride
+            current_block.push(d);
+        } else { 
+            // s == 0 but base_stride != 0 => meet broadcast axis
+            blocks.push((current_block.iter().product(), base_stride));
+            current_block.clear();
+            base_stride = s;
+            current_block.push(d);
         }
     }
     if !current_block.is_empty() {
