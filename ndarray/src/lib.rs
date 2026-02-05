@@ -556,7 +556,7 @@ fn compute_shape_block(shape: &[usize], stride: &[usize]) -> Vec<(usize, usize)>
     assert_ne!(shape.len(), 0);
     let mut blocks: Vec<(usize, usize)> = Vec::with_capacity(shape.len());
     let mut current_block: Vec<usize> = Vec::with_capacity(shape.len());
-    let mut base_stride: usize = *stride.first().unwrap();
+    let mut base_stride: usize = 0;
     for (axis, (&d, &s)) in zip(shape.iter(), stride.iter()).enumerate().rev() {
         if current_block.is_empty() {
             if s != 0 {
@@ -683,7 +683,7 @@ fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize], broadcas
             )))
         });
 
-        if o == 1 || o == 0 && b > o { // this is the broadcast dimension,
+        if (o == 1 || o == 0) && b > o { // this is the broadcast dimension,
             // so stride is always 0
             strides.push(0)
         } else {
