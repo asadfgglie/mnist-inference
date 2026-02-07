@@ -325,31 +325,31 @@ pub fn slice(input: TokenStream) -> TokenStream {
     let idents: Vec<_> = input.0.into_iter()
         .map(|s| match s {
             Slice::All => {quote! {
-                ::ndarray::AxisSlice::All
+                ::ndarray::axis::AxisSlice::All
             }},
             Slice::Index { index } => {quote! {
-                ::ndarray::AxisSlice::Index{ index: #index }
+                ::ndarray::axis::AxisSlice::Index{ index: #index }
             }},
             Slice::Range { start, end } => {quote! {
-                ::ndarray::AxisSlice::Range { start: #start, end: #end }
+                ::ndarray::axis::AxisSlice::Range { start: #start, end: #end }
             }},
             Slice::RangeFrom { start } => {quote! {
-                ::ndarray::AxisSlice::RangeFrom { start: #start }
+                ::ndarray::axis::AxisSlice::RangeFrom { start: #start }
             }},
             Slice::RangeFromStep { start, step } => {quote! {
-                ::ndarray::AxisSlice::RangeFromStep { start: #start, step: #step }
+                ::ndarray::axis::AxisSlice::RangeFromStep { start: #start, step: #step }
             }},
             Slice::RangeTo { end } => {quote! {
-                ::ndarray::AxisSlice::RangeTo { end: #end }
+                ::ndarray::axis::AxisSlice::RangeTo { end: #end }
             }},
             Slice::RangeToStep { end, step } => {quote! {
-                ::ndarray::AxisSlice::RangeToStep { end: #end, step: #step }
+                ::ndarray::axis::AxisSlice::RangeToStep { end: #end, step: #step }
             }},
             Slice::RangeStep { start, end, step } => {quote! {
-                ::ndarray::AxisSlice::RangeStep { start: #start, end: #end, step: #step }
+                ::ndarray::axis::AxisSlice::RangeStep { start: #start, end: #end, step: #step }
             }},
             Slice::Step { step } => {quote! {
-                ::ndarray::AxisSlice::Step{ step: #step }
+                ::ndarray::axis::AxisSlice::Step{ step: #step }
             }},
         })
         .collect();

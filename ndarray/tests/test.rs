@@ -1,4 +1,4 @@
-use ndarray::*;
+use ndarray::{AxisSlice, slice};
 
 #[test]
 fn test_slice_marco() {
