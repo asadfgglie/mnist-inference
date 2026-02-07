@@ -36,7 +36,7 @@ pub trait NdArrayLike<T> {
         index
     }
     fn to_view<'a, 'b: 'a>(&'b self) -> NdArrayView<'a, T> {
-        NdArrayView::new(self.data(), self.shape(), self.shape().into(), self.strides().into(), self.base_offset())
+        NdArrayView::new(self.data(), self.shape().into(), self.strides().into(), self.base_offset())
     }
     fn iter_index<'a>(&'a self) -> NdArrayDataIndexIterator<'a>
     where Self: Sized, T: 'a {
@@ -46,7 +46,7 @@ pub trait NdArrayLike<T> {
     // shape-related op
     fn reshape<'a, 'b: 'a>(&'b self, shape: NdArrayIndex) -> Result<NdArrayView<'a, T>, NdArrayError> {
         let stride = compute_reshape_strides(self.shape(), self.strides(), &shape)?;
-        Ok(NdArrayView::new(self.data(), self.shape(), shape, stride, self.base_offset()))
+        Ok(NdArrayView::new(self.data(), shape, stride, self.base_offset()))
     }
     fn squeeze<'a, 'b: 'a>(&'b self, axis: usize) -> Result<NdArrayView<'a, T>, NdArrayError> {
         match self.shape().get(axis) {
@@ -86,7 +86,7 @@ pub trait NdArrayLike<T> {
     }
     fn broadcast_to<'a, 'b: 'a>(&'b self, shape: NdArrayIndex) -> Result<NdArrayView<'a, T>, NdArrayError> {
         let stride = compute_broadcast_strides(self.shape(), self.strides(), &shape)?;
-        Ok(NdArrayView::new(self.data(), self.shape(), shape, stride, self.base_offset()))
+        Ok(NdArrayView::new(self.data(), shape, stride, self.base_offset()))
     }
     fn permute<'a, 'b: 'a>(&'b self, permutation: NdArrayIndex) -> Result<NdArrayView<'a, T>, NdArrayError> {
         if self.shape().len() != permutation.len() {
@@ -110,7 +110,7 @@ pub trait NdArrayLike<T> {
             shape[axis] = self.shape()[permutation[axis]];
             stride[axis] = self.strides()[permutation[axis]];
         }
-        Ok(NdArrayView::new(self.data(), self.shape(), shape, stride, self.base_offset()))
+        Ok(NdArrayView::new(self.data(), shape, stride, self.base_offset()))
     }
     fn transpose<'a, 'b: 'a>(&'b self, axis1: usize, axis2: usize) -> Result<NdArrayView<'a, T>, NdArrayError> {
         let mut permutation: NdArrayIndex = (0..self.shape().len()).collect::<Vec<usize>>().into();
@@ -192,7 +192,7 @@ pub trait NdArrayLike<T> {
                     }
                 }
             }
-            Ok(NdArrayView::new(self.data(), self.shape(), shape.into(), strides.into(), offset))
+            Ok(NdArrayView::new(self.data(), shape.into(), strides.into(), offset))
         }
     }
 }

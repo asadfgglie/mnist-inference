@@ -316,8 +316,8 @@ pub fn broadcast_array<'a, 'b, 'c: 'a, 'd: 'b, L, R>(lhs: &'c impl NdArrayLike<L
             let lhs_strides = compute_broadcast_strides(lhs.shape(), lhs.strides(), &lhs_shape)?;
             let rhs_strides = compute_broadcast_strides(rhs.shape(), rhs.strides(), &rhs_shape)?;
 
-            Ok((NdArrayView::new(lhs.data(), lhs.shape(), lhs_shape, lhs_strides, lhs.base_offset()),
-                NdArrayView::new(rhs.data(), rhs.shape(), rhs_shape, rhs_strides, lhs.base_offset())))
+            Ok((NdArrayView::new(lhs.data(), lhs_shape, lhs_strides, lhs.base_offset()),
+                NdArrayView::new(rhs.data(), rhs_shape, rhs_strides, lhs.base_offset())))
         }
         Err(e) => Err(e)
     }
@@ -337,58 +337,26 @@ pub(crate) fn compute_index(indices: &[usize], strides: &[usize], base_offset: u
         .fold(0, |acc, (axis, &x)| acc + x * strides[axis]) + base_offset
 }
 
-pub(crate) fn validate_view(old_shape: &[usize], view_shape: &[usize], view_stride: &[usize]) -> Result<(), NdArrayError> {
+pub(crate) fn validate_view(data_bound: usize, view_offset: usize, view_shape: &[usize], view_stride: &[usize]) -> Result<(), NdArrayError> {
     if view_shape.len() != view_stride.len() {
         Err(NdArrayError::InvalidStridesError(format!(
             "view_shape.len() ({}) != view_stride.len() ({})", view_shape.len(), view_stride.len()
         )))
     } else {
-        let mut old_shape_iter = old_shape.iter().rev();
-        let mut view_shape_iter = view_shape.iter().rev();
-        let mut view_stride_iter = view_stride.iter().rev();
-
-        loop {
-            let (o, v, s) =
-                (old_shape_iter.next(), view_shape_iter.next(), view_stride_iter.next());
-            if o.is_none() && v.is_none() && s.is_none() {
-                break;
-            }
-
-            let (o, v, s) = (match o {
-                Some(x) => *x,
-                None => 1,
-            }, match v {
-                Some(x) => *x,
-                None => return Err(NdArrayError::InvalidStridesError(format!(
-                    "view_shape shorter than old_shape, view_shape len: {}, \
-                      old_shape len: {}",
-                    view_shape.len(),
-                    old_shape.len()
-                )))
-            },
-                             match s {
-                                 Some(x) => *x,
-                                 None => return Err(NdArrayError::InvalidStridesError(format!(
-                                     "view_stride shorter than old_shape, view_stride len: {}, \
-                      old_shape len: {}",
-                                     view_stride.len(),
-                                     old_shape.len()
-                                 )))
-                             });
-
-            if v != o && o != 1 {
-                return Err(NdArrayError::BroadcastError(format!(
-                    "Cannot create a view with shape {:?} from an array of shape {:?}.",
-                    view_shape, old_shape
-                )))
-            } else if v > o && o == 1 && s != 0 {
-                return Err(NdArrayError::InvalidStridesError(format!(
-                    "Strides {:?} are invalid for a view of shape {:?}, old shape: {:?}. \
-                    Broadcast axis stride must be zero!",
-                    view_stride, view_shape, old_shape
-                )))
-            }
+        let mut last_index = Vec::with_capacity(view_shape.len());
+        for d in view_shape.iter() {
+            last_index.push(d - 1);
         }
-        Ok(())
+        
+        let max_offset = compute_index(&last_index, view_stride, view_offset);
+        if max_offset < data_bound {
+            Ok(())
+        } else { 
+            Err(NdArrayError::InvalidStridesError(format!(
+                "view will out of bound. view_offset: {}, view_shape: {:?}, view_stride: {:?}, data_bound: {}, \
+                last_index: {:?} => offset: {}",
+                view_offset, view_shape, view_stride, data_bound, last_index, max_offset
+            )))
+        }
     }
 }

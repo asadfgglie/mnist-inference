@@ -86,7 +86,7 @@ impl <T> NdArray<T> {
                    data.len(), shape, shape.iter().product::<usize>());
         }
 
-        match validate_view(&shape, &shape, &strides) {
+        match validate_view(data.len(), base_offset, &shape, &strides) {
             Ok(_) => Self {
                 data,
                 shape,
@@ -244,8 +244,8 @@ impl <T: Clone> NdArray<T> {
 }
 
 impl <'a, T> NdArrayView<'a, T> {
-    pub fn new<'b: 'a>(array: &'b [T], old_shape: &[usize], shape: NdArrayIndex, strides: NdArrayIndex, offset: usize) -> Self {
-        match validate_view(old_shape, &shape, &strides) {
+    pub fn new<'b: 'a>(array: &'b [T], shape: NdArrayIndex, strides: NdArrayIndex, offset: usize) -> Self {
+        match validate_view(array.len(), offset, &shape, &strides) {
             Ok(_) => (),
             Err(e) => panic!("{:?}", e)
         }
