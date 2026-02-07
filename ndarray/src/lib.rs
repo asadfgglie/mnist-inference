@@ -3,6 +3,7 @@ use std::iter::zip;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Deref, DerefMut, Div, DivAssign, Index, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
 use ndarray_marco::nd_array_index;
+pub use ndarray_marco::slice;
 
 #[derive(Debug, PartialEq)]
 pub struct NdArray<T> {
@@ -25,13 +26,14 @@ nd_array_index!{8}
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum AxisSlice {                                        // py means    rust means
     All,                                                    // :        or ..
-    Index(usize),                                           // 0
+    Index { index: usize },                                 // 0
     Range { start: usize, end: usize },                     // 1:3      or 1..3
     RangeFrom { start: usize },                             // 1:       or 1..
     RangeFromStep { start: usize, step: usize },            // 1::2     or (1..).step_by(2)
     RangeTo { end: usize },                                 // :3       or ..3
     RangeToStep { end: usize, step: usize },                // :3:2     or (..3).step_by(2)
     RangeStep { start: usize, end: usize, step: usize },    // 1:10:2   or (1..10).step_by(2)
+    Step { step: usize },                                   // ::2      or (..).step_by(2)
 }
 
 pub struct NdArrayIterator<'a, T: NdArrayLike<DT>, DT> {
@@ -235,14 +237,14 @@ pub trait NdArrayLike<T> {
                         shape.push(self.shape()[axis]);
                         strides.push(self.strides()[axis]);
                     }
-                    AxisSlice::Index(i) => {
-                        if i >= &self.shape()[axis] {
+                    AxisSlice::Index { index } => {
+                        if index >= &self.shape()[axis] {
                             return Err(NdArrayError::SliceError(format!(
-                                "Index out of bounds, shape: {:?}, axis: {axis}, index: {i}", self.shape()
+                                "Index out of bounds, shape: {:?}, axis: {axis}, index: {index}", self.shape()
                             )))
                         }
 
-                        offset += i * self.strides()[axis];
+                        offset += index * self.strides()[axis];
                     }
                     AxisSlice::Range { start, end } => {
                         process_range(*start, *end, 1, axis)?;
@@ -261,6 +263,9 @@ pub trait NdArrayLike<T> {
                     },
                     AxisSlice::RangeStep { start, end, step } => {
                         process_range(*start, *end, *step, axis)?;
+                    },
+                    AxisSlice::Step { step} => {
+                        process_range(0, self.shape()[axis], *step, axis)?;
                     }
                 }
             }

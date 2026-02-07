@@ -1,6 +1,8 @@
 use proc_macro::TokenStream;
-use quote::{quote, format_ident};
-use syn::{parse_macro_input, LitInt};
+use quote::{format_ident, quote, ToTokens};
+use syn::parse::{Parse, ParseStream, Result};
+use syn::punctuated::Punctuated;
+use syn::{parse_macro_input, Expr, LitInt, Token};
 
 #[proc_macro]
 pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
@@ -173,5 +175,186 @@ pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
                 $crate::NdArrayIndex::DyDim(vec![$($x),+])
             };
         }
+    })
+}
+
+struct UsizeExpr(pub Expr);
+
+impl Parse for UsizeExpr {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(UsizeExpr(input.parse()?))
+    }
+}
+
+impl ToTokens for UsizeExpr {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        self.0.to_tokens(tokens)
+    }
+}
+
+enum Slice {                                                            // py means    rust means
+    Step { step: UsizeExpr },                                           // ::2      or (..).step_by(2)
+    All,                                                                // :        or ..
+    RangeTo { end: UsizeExpr },                                         // :3       or ..3
+    RangeToStep { end: UsizeExpr, step: UsizeExpr },                    // :3:2     or (..3).step_by(2)
+    Index { index: UsizeExpr },                                         // 0
+    RangeFromStep { start: UsizeExpr, step: UsizeExpr },                // 1::2     or (1..).step_by(2)
+    RangeFrom { start: UsizeExpr },                                     // 1:       or 1..
+    Range { start: UsizeExpr, end: UsizeExpr },                         // 1:3      or 1..3
+    RangeStep { start: UsizeExpr, end: UsizeExpr, step: UsizeExpr },    // 1:10:2   or (1..10).step_by(2)
+}
+
+struct Slices(pub Punctuated<Slice, Token![,]>);
+
+impl Parse for Slice {
+    /// ```cfg
+    /// slice ::= "::" `usize expr` |                               // Step
+    ///           ":" |                                             // All
+    ///           ":" `usize expr` |                                // RangeTo
+    ///           ":" `usize expr` ":" `usize expr` |               // RangeToStep
+    ///           `usize expr` |                                    // Index
+    ///           `usize expr` "::" `usize expr`;                   // RangeFromStep
+    ///           `usize expr` ":" |                                // RangeFrom
+    ///           `usize expr` ":" `usize expr` |                   // Range
+    ///           `usize expr` ":" `usize expr` ":" `usize expr`    // RangeStep
+    /// ```
+    fn parse(input: ParseStream) -> Result<Self> {
+        if input.peek(Token![::]) {
+            input.parse::<Token![::]>()?;
+            Ok(Slice::Step { step: input.parse::<UsizeExpr>()?  })
+        } else if input.peek(Token![:]) {
+            input.parse::<Token![:]>()?;
+
+            if !input.is_empty() && !input.peek(Token![,]) {
+                let end = input.parse::<UsizeExpr>()?;
+
+                if input.peek(Token![:]) {
+                    input.parse::<Token![:]>()?;
+
+                    let step = input.parse::<UsizeExpr>()?;
+                    Ok(Slice::RangeToStep { end, step })
+                } else {
+                    Ok(Slice::RangeTo { end })
+                }
+            } else {
+                Ok(Slice::All)
+            }
+        } else if !input.is_empty() && !input.peek(Token![,]) {
+            let index = input.parse::<UsizeExpr>()?;
+
+            if input.peek(Token![::]) {
+                input.parse::<Token![::]>()?;
+
+                let start = index;
+                let step = input.parse::<UsizeExpr>()?;
+                Ok(Slice::RangeFromStep { start, step })
+
+            } else if input.peek(Token![:]) {
+                input.parse::<Token![:]>()?;
+
+                let start = index;
+                if !input.is_empty() && !input.peek(Token![,]) {
+                    let end = input.parse::<UsizeExpr>()?;
+
+                    if input.peek(Token![:]) {
+                        input.parse::<Token![:]>()?;
+
+                        let step = input.parse::<UsizeExpr>()?;
+                        Ok(Slice::RangeStep { start, end, step })
+                    } else {
+                        Ok(Slice::Range { start, end })
+                    }
+                } else {
+                    Ok(Slice::RangeFrom { start })
+                }
+            } else {
+                Ok(Slice::Index { index })
+            }
+        } else {
+            Err(input.error("Invalid slice syntax"))
+        }
+    }
+}
+
+impl Parse for Slices {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let slices = input.parse_terminated(Slice::parse, Token![,])?;
+        Ok(Slices(slices))
+    }
+}
+
+
+/// use python slice syntax
+/// ```cfg
+/// slices ::= (slice | slice "," slices) ","{0,1}
+/// slice ::= ":" |                                             // All
+///           ":" `usize expr` |                                // RangeTo
+///           ":" `usize expr` ":" `usize expr` |               // RangeToStep
+///           "::" `usize expr` |                               // Step
+///           `usize expr` |                                    // Index
+///           `usize expr` ":" |                                // RangeFrom
+///           `usize expr` ":" `usize expr` |                   // Range
+///           `usize expr` ":" `usize expr` ":" `usize expr`    // RangeStep
+///           `usize expr` "::" `usize expr`;                   // RangeFromStep
+/// ```
+///
+/// # Example
+/// ```ignore
+/// use ndarray::{slice, AxisSlice};
+/// assert_eq!(slice![:], [AxisSlice::All]);
+///
+/// assert_eq!(slice![1+1,], [AxisSlice::Index { index: 1+1 }]);
+///
+/// assert_eq!(slice![1:3+9*2], [AxisSlice::Range { start: 1, end: 3+9*2 }]);
+///
+/// assert_eq!(slice![1:], [AxisSlice::RangeFrom { start: 1 }]);
+///
+/// assert_eq!(slice![1::2], [AxisSlice::RangeFromStep { start: 1, step: 2 }]);
+///
+/// assert_eq!(slice![:3], [AxisSlice::RangeTo { end: 3 }]);
+///
+/// assert_eq!(slice![:3:2], [AxisSlice::RangeToStep { end: 3, step: 2 }]);
+///
+/// assert_eq!(slice![1:10:2], [AxisSlice::RangeStep { start: 1, end: 10, step: 2 }]);
+///
+/// assert_eq!(slice![::2], [AxisSlice::Step { step: 2 }]);
+/// ```
+#[proc_macro]
+pub fn slice(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as Slices);
+    let idents: Vec<_> = input.0.into_iter()
+        .map(|s| match s {
+            Slice::All => {quote! {
+                ::ndarray::AxisSlice::All
+            }},
+            Slice::Index { index } => {quote! {
+                ::ndarray::AxisSlice::Index{ index: #index }
+            }},
+            Slice::Range { start, end } => {quote! {
+                ::ndarray::AxisSlice::Range { start: #start, end: #end }
+            }},
+            Slice::RangeFrom { start } => {quote! {
+                ::ndarray::AxisSlice::RangeFrom { start: #start }
+            }},
+            Slice::RangeFromStep { start, step } => {quote! {
+                ::ndarray::AxisSlice::RangeFromStep { start: #start, step: #step }
+            }},
+            Slice::RangeTo { end } => {quote! {
+                ::ndarray::AxisSlice::RangeTo { end: #end }
+            }},
+            Slice::RangeToStep { end, step } => {quote! {
+                ::ndarray::AxisSlice::RangeToStep { end: #end, step: #step }
+            }},
+            Slice::RangeStep { start, end, step } => {quote! {
+                ::ndarray::AxisSlice::RangeStep { start: #start, end: #end, step: #step }
+            }},
+            Slice::Step { step } => {quote! {
+                ::ndarray::AxisSlice::Step{ step: #step }
+            }},
+        })
+        .collect();
+
+    TokenStream::from(quote! {
+        [ #( #idents ),* ]
     })
 }
