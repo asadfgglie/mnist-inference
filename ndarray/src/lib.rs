@@ -102,7 +102,7 @@ pub trait NdArrayLike<T> {
     fn strides(&self) -> &[usize];
     fn base_offset(&self) -> usize;
     fn is_contiguous(&self) -> bool {
-        self.strides() == compute_stride(self.shape())
+        compute_shape_block(self.shape(), self.strides()).len() == 1
     }
     fn compute_index(&self, indices: &[usize]) -> usize {
         let index = compute_index(indices, self.strides(), self.base_offset());
@@ -225,9 +225,9 @@ pub trait NdArrayLike<T> {
                         )))
                     }
 
-                    shape.push((end - start) / step);
-                    strides.push(strides[axis] * step);
-                    offset += start * strides[axis];
+                    shape.push((end - start).div_ceil(step));
+                    strides.push(self.strides()[axis] * step);
+                    offset += start * self.strides()[axis];
                     Ok(())
                 };
                 match slice {
@@ -242,7 +242,7 @@ pub trait NdArrayLike<T> {
                             )))
                         }
 
-                        offset += i * strides[axis];
+                        offset += i * self.strides()[axis];
                     }
                     AxisSlice::Range { start, end } => {
                         process_range(*start, *end, 1, axis)?;
@@ -728,6 +728,7 @@ pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<NdArrayIndex, Nd
 }
 
 
+/// return Vec<(block_elements, base_stride)>
 fn compute_shape_block(shape: &[usize], stride: &[usize]) -> Vec<(usize, usize)> {
     assert_eq!(shape.len(), stride.len());
     assert_ne!(shape.len(), 0);
