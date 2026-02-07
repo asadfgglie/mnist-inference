@@ -77,7 +77,7 @@ pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
     }
 
     TokenStream::from(quote! {
-        #[derive(Debug, Clone, PartialEq)]
+        #[derive(Debug, Clone, PartialEq, Eq)]
         pub enum NdArrayIndex {
             #enum_variants
             DyDim(Vec<usize>),

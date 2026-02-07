@@ -9,15 +9,30 @@ pub struct NdArray<T> {
     data: Box<[T]>,
     shape: NdArrayIndex,
     strides: NdArrayIndex,
+    base_offset: usize,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct NdArrayView<'a, T> {
     data: &'a [T],
     shape: NdArrayIndex,
     strides: NdArrayIndex,
+    base_offset: usize,
 }
 
 nd_array_index!{8}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum AxisSlice {                                        // py means    rust means
+    All,                                                    // :        or ..
+    Index(usize),                                           // 0
+    Range { start: usize, end: usize },                     // 1:3      or 1..3
+    RangeFrom { start: usize },                             // 1:       or 1..
+    RangeFromStep { start: usize, step: usize },            // 1::2     or 1..:2
+    RangeTo { end: usize },                                 // :3       or ..3
+    RangeToStep { end: usize, step: usize },                // :3:2     or ..3:2
+    RangeStep { start: usize, end: usize, step: usize },    // 1:10:2   or 1..10:2
+}
 
 pub struct NdArrayIterator<'a, T: NdArrayLike<DT>, DT> {
     data: &'a T,
@@ -33,6 +48,7 @@ pub struct NdArrayIterator<'a, T: NdArrayLike<DT>, DT> {
 pub struct NdArrayDataIndexIterator<'a> {
     data_len: usize,
     data_strides: &'a [usize],
+    data_offset: usize,
     iter: IndexIterator<'a>
 }
 
@@ -43,6 +59,7 @@ pub struct NdArrayFastDataIndexIterator<'a> {
     data_len: usize,
     data_strides: &'a [usize],
     data_shape: &'a [usize],
+    data_offset: usize,
     index: NdArrayIndex,
     axis_counter: usize,
     has_done: bool,
@@ -62,6 +79,8 @@ pub struct IndexIterator<'a> {
 pub enum NdArrayError {
     BroadcastError(String),
     ReshapeError(String),
+    PermuteError(String),
+    SliceError(String),
     IncompatibleReshapeError(String),
     InvalidStridesError(String),
     InvalidShapeError(String),
@@ -69,6 +88,8 @@ pub enum NdArrayError {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Scalar<T>(pub T);
+
+impl <T: Copy> Copy for Scalar<T> {}
 
 pub trait Cast<T> {
     type Target;
@@ -79,11 +100,12 @@ pub trait NdArrayLike<T> {
     fn data<'a, 'b: 'a>(&'b self) -> &'a [T];
     fn shape(&self) -> &[usize];
     fn strides(&self) -> &[usize];
+    fn base_offset(&self) -> usize;
     fn is_contiguous(&self) -> bool {
         self.strides() == compute_stride(self.shape())
     }
     fn compute_index(&self, indices: &[usize]) -> usize {
-        let index = compute_index(indices, self.strides());
+        let index = compute_index(indices, self.strides(), self.base_offset());
         match self.data().get(index) {
             Some(_) => (),
             None => {
@@ -93,7 +115,7 @@ pub trait NdArrayLike<T> {
         index
     }
     fn to_view<'a, 'b: 'a>(&'b self) -> NdArrayView<'a, T> {
-        NdArrayView::new(self.data(), self.shape(), self.shape().into(), self.strides().into())
+        NdArrayView::new(self.data(), self.shape(), self.shape().into(), self.strides().into(), self.base_offset())
     }
     fn iter_index<'a>(&'a self) -> NdArrayDataIndexIterator<'a>
     where Self: Sized, T: 'a {
@@ -103,7 +125,7 @@ pub trait NdArrayLike<T> {
     // shape-related op
     fn reshape<'a, 'b: 'a>(&'b self, shape: NdArrayIndex) -> Result<NdArrayView<'a, T>, NdArrayError> {
         let stride = compute_reshape_strides(self.shape(), self.strides(), &shape)?;
-        Ok(NdArrayView::new(self.data(), self.shape(), shape, stride))
+        Ok(NdArrayView::new(self.data(), self.shape(), shape, stride, self.base_offset()))
     }
     fn squeeze<'a, 'b: 'a>(&'b self, axis: usize) -> Result<NdArrayView<'a, T>, NdArrayError> {
         match self.shape().get(axis) {
@@ -141,9 +163,109 @@ pub trait NdArrayLike<T> {
             }
         }
     }
-    fn broadcast_to<'a, 'b: 'a>(&'b self, shape: &[usize]) -> Result<NdArrayView<'a, T>, NdArrayError> {
-        let stride = compute_broadcast_strides(self.shape(), self.strides(), shape)?;
-        Ok(NdArrayView::new(self.data(), self.shape(), shape.into(), stride))
+    fn broadcast_to<'a, 'b: 'a>(&'b self, shape: NdArrayIndex) -> Result<NdArrayView<'a, T>, NdArrayError> {
+        let stride = compute_broadcast_strides(self.shape(), self.strides(), &shape)?;
+        Ok(NdArrayView::new(self.data(), self.shape(), shape, stride, self.base_offset()))
+    }
+    fn permute<'a, 'b: 'a>(&'b self, permutation: NdArrayIndex) -> Result<NdArrayView<'a, T>, NdArrayError> {
+        if self.shape().len() != permutation.len() {
+            return Err(NdArrayError::PermuteError(format!(
+                "Illegal shape permutation. target permutation {permutation:?}, old shape: {:?}",
+                self.shape(),
+            )))
+        }
+
+        for axis in 0..self.shape().len() {
+            if !permutation.contains(&axis) {
+                return Err(NdArrayError::PermuteError(format!(
+                    "axis {axis} not found in target permutation {permutation:?}"
+                )))
+            }
+        }
+
+        let mut shape: NdArrayIndex = self.shape().into();
+        let mut stride: NdArrayIndex = self.strides().into();
+        for axis in 0..self.shape().len() {
+            shape[axis] = self.shape()[permutation[axis]];
+            stride[axis] = self.strides()[permutation[axis]];
+        }
+        Ok(NdArrayView::new(self.data(), self.shape(), shape, stride, self.base_offset()))
+    }
+    fn transpose<'a, 'b: 'a>(&'b self, axis1: usize, axis2: usize) -> Result<NdArrayView<'a, T>, NdArrayError> {
+        let mut permutation: NdArrayIndex = (0..self.shape().len()).collect::<Vec<usize>>().into();
+        let tmp = permutation[axis1];
+        permutation[axis1] = permutation[axis2];
+        permutation[axis2] = tmp;
+        self.permute(permutation)
+    }
+
+    fn slice<'a, 'b: 'a>(&'b self, slices: &[AxisSlice]) -> Result<NdArrayView<'a, T>, NdArrayError> {
+        if slices.len() != self.shape().len() {
+            let mut s = Vec::with_capacity(self.shape().len());
+            s.extend_from_slice(slices);
+            for _ in 0..(self.shape().len() - slices.len()) {
+                s.push(AxisSlice::All);
+            }
+            self.slice(&s)
+        } else {
+            let mut offset = self.base_offset();
+            let mut shape = Vec::with_capacity(self.shape().len());
+            let mut strides = Vec::with_capacity(self.strides().len());
+            for (axis, slice) in slices.iter().enumerate() {
+                let mut process_range = |start: usize, end: usize, step: usize, axis: usize| {
+                    if start >= self.shape()[axis] || end > self.shape()[axis] {
+                        return Err(NdArrayError::SliceError(format!(
+                            "Index out of bounds, shape: {:?}, axis: {axis}, start index: {start}, end index: {end}", self.shape()
+                        )))
+                    }
+
+                    if start >= end {
+                        return Err(NdArrayError::SliceError(format!(
+                            "Invalid slice, start index: {start}, end index: {end}",
+                        )))
+                    }
+
+                    shape.push((end - start) / step);
+                    strides.push(strides[axis] * step);
+                    offset += start * strides[axis];
+                    Ok(())
+                };
+                match slice {
+                    AxisSlice::All => {
+                        shape.push(self.shape()[axis]);
+                        strides.push(self.strides()[axis]);
+                    }
+                    AxisSlice::Index(i) => {
+                        if i >= &self.shape()[axis] {
+                            return Err(NdArrayError::SliceError(format!(
+                                "Index out of bounds, shape: {:?}, axis: {axis}, index: {i}", self.shape()
+                            )))
+                        }
+
+                        offset += i * strides[axis];
+                    }
+                    AxisSlice::Range { start, end } => {
+                        process_range(*start, *end, 1, axis)?;
+                    }
+                    AxisSlice::RangeFrom { start } => {
+                        process_range(*start, self.shape()[axis], 1, axis)?;
+                    },
+                    AxisSlice::RangeFromStep { start, step } => {
+                        process_range(*start, self.shape()[axis], *step, axis)?;
+                    },
+                    AxisSlice::RangeTo { end } => {
+                        process_range(0, *end, 1, axis)?;
+                    },
+                    AxisSlice::RangeToStep { end, step } => {
+                        process_range(0, *end, *step, axis)?;
+                    },
+                    AxisSlice::RangeStep { start, end, step } => {
+                        process_range(*start, *end, *step, axis)?;
+                    }
+                }
+            }
+            Ok(NdArrayView::new(self.data(), self.shape(), shape.into(), strides.into(), offset))
+        }
     }
 }
 
@@ -157,6 +279,9 @@ impl <T> NdArrayLike<T> for NdArray<T> {
     fn strides(&self) -> &[usize] {
         &self.strides
     }
+    fn base_offset(&self) -> usize {
+        self.base_offset
+    }
 }
 
 impl <T> NdArrayLike<T> for &NdArray<T> {
@@ -168,6 +293,9 @@ impl <T> NdArrayLike<T> for &NdArray<T> {
     }
     fn strides(&self) -> &[usize] {
         &self.strides
+    }
+    fn base_offset(&self) -> usize {
+        self.base_offset
     }
 }
 
@@ -181,6 +309,9 @@ impl <'a, T> NdArrayLike<T> for NdArrayView<'a, T> {
     fn strides(&self) -> &[usize] {
         &self.strides
     }
+    fn base_offset(&self) -> usize {
+        self.base_offset
+    }
 }
 
 impl <'a: 'b, 'b, T> NdArrayLike<T> for &'b NdArrayView<'a, T> {
@@ -193,10 +324,13 @@ impl <'a: 'b, 'b, T> NdArrayLike<T> for &'b NdArrayView<'a, T> {
     fn strides(&self) -> &[usize] {
         &self.strides
     }
+    fn base_offset(&self) -> usize {
+        self.base_offset
+    }
 }
 
 impl <T> NdArray<T> {
-    pub fn new_shape_with_strides(data: Box<[T]>, shape: NdArrayIndex, strides: NdArrayIndex) -> Self {
+    pub fn new_array(data: Box<[T]>, shape: NdArrayIndex, strides: NdArrayIndex, base_offset: usize) -> Self {
         if data.len() != shape.iter().product() {
             panic!("Data length ({}) does not match shape dimensions ({:?}), shape except {} length data.",
                    data.len(), shape, shape.iter().product::<usize>());
@@ -207,12 +341,14 @@ impl <T> NdArray<T> {
                 data,
                 shape,
                 strides,
+                base_offset,
             },
             Err(_) => match validate_view(&shape, &shape, &strides) {
                 Ok(_) => Self {
                     data,
                     shape,
                     strides,
+                    base_offset,
                 },
                 Err(e) => panic!("{:?}", e)
             }
@@ -221,10 +357,11 @@ impl <T> NdArray<T> {
     pub fn new_shape_with_index(data: Vec<T>, shape: NdArrayIndex) -> Self {
         let stride = compute_stride(&shape);
 
-        Self::new_shape_with_strides(
+        Self::new_array(
             data.into_boxed_slice(),
             shape,
             stride,
+            0
         )
     }
     pub fn new_shape(data: Vec<T>, shape: Vec<usize>) -> Self {
@@ -237,12 +374,46 @@ impl <T> NdArray<T> {
         let shape = vec![data.len()];
         Self::new_shape(data, shape)
     }
+
+    // shape-related op
     pub fn broadcast_array_to(array: Self, shape: NdArrayIndex) -> Self {
         let stride = match compute_broadcast_strides(array.shape(), array.strides(), &shape) {
             Ok(s) => s,
             Err(e) => panic!("{:?}", e)
         };
-        Self::new_shape_with_strides(array.data, shape, stride)
+        Self::new_array(array.data, shape, stride, array.base_offset)
+    }
+    pub fn permute_array(array: Self, permutation: NdArrayIndex) -> Self {
+        if array.shape().len() != permutation.len() {
+            panic!(
+                "Illegal shape permutation. target permutation {permutation:?}, old shape: {:?}",
+                array.shape(),
+            )
+        }
+
+        for axis in 0..array.shape().len() {
+            if !permutation.contains(&axis) {
+                panic!(
+                    "axis {axis} not found in target permutation {permutation:?}"
+                )
+            }
+        }
+
+        let mut shape: NdArrayIndex = array.shape().into();
+        let mut stride: NdArrayIndex = array.strides().into();
+        for axis in 0..array.shape().len() {
+            shape[axis] = array.shape()[permutation[axis]];
+            stride[axis] = array.strides()[permutation[axis]];
+        }
+
+        Self::new_array(array.data, shape, stride, array.base_offset)
+    }
+    pub fn transpose_array(array: Self, axis1: usize, axis2: usize) -> Self {
+        let mut permutation: NdArrayIndex = (0..array.shape().len()).collect::<Vec<usize>>().into();
+        let tmp = permutation[axis1];
+        permutation[axis1] = permutation[axis2];
+        permutation[axis2] = tmp;
+        Self::permute_array(array, permutation)
     }
 
     pub fn item(self) -> Result<Scalar<T>, NdArrayError> {
@@ -284,7 +455,7 @@ impl <T: Clone> NdArray<T> {
             panic!("Invalid shape ({:?}) does not match data len ({}).", shape, array.data.len());
         }
         match compute_reshape_strides(array.shape(), array.strides(), &shape) {
-            Ok(stride) => Self::new_shape_with_strides(array.data, shape, stride),
+            Ok(stride) => Self::new_array(array.data, shape, stride, array.base_offset),
             Err(NdArrayError::IncompatibleReshapeError(_)) => {
                 Self::reshape_array(array.contiguous(), shape)
             },
@@ -331,7 +502,7 @@ impl <T: Clone> NdArray<T> {
 }
 
 impl <'a, T> NdArrayView<'a, T> {
-    pub fn new<'b: 'a>(array: &'b [T], old_shape: &[usize], shape: NdArrayIndex, strides: NdArrayIndex) -> Self {
+    pub fn new<'b: 'a>(array: &'b [T], old_shape: &[usize], shape: NdArrayIndex, strides: NdArrayIndex, offset: usize) -> Self {
         match validate_view(old_shape, &shape, &strides) {
             Ok(_) => (),
             Err(e) => panic!("{:?}", e)
@@ -341,6 +512,7 @@ impl <'a, T> NdArrayView<'a, T> {
             data: array,
             shape,
             strides,
+            base_offset: offset,
         }
     }
 }
@@ -349,7 +521,7 @@ impl <'a, T: NdArrayLike<DT>, DT> NdArrayIterator<'a, T, DT> {
     pub fn new<'b: 'a>(array: &'b T) -> Self {
         Self {
             data: array,
-            index_iter: NdArrayFastDataIndexIterator::iter_index(array.shape(), array.strides()),
+            index_iter: NdArrayFastDataIndexIterator::iter_index(array.shape(), array.strides(), array.base_offset()),
             _marker: PhantomData,
         }
     }
@@ -361,12 +533,13 @@ impl <'a> NdArrayDataIndexIterator<'a> {
             data_len: array.data().len(),
             data_strides: array.strides(),
             iter: IndexIterator::iter_shape(array.shape()),
+            data_offset: array.base_offset(),
         }
     }
 }
 
 impl <'a> NdArrayFastDataIndexIterator<'a> {
-    pub fn iter_index<'b: 'a>(shape: &'b [usize], strides: &'b [usize]) -> Self {
+    pub fn iter_index<'b: 'a>(shape: &'b [usize], strides: &'b [usize], offset: usize) -> Self {
         Self {
             data_len: shape.iter().product(),
             data_strides: strides,
@@ -374,6 +547,7 @@ impl <'a> NdArrayFastDataIndexIterator<'a> {
             index: NdArrayIndex::zeros(shape.len()),
             axis_counter: shape.len() - 1,
             has_done: false,
+            data_offset: offset,
         }
     }
 }
@@ -389,7 +563,7 @@ impl <'a> IndexIterator<'a> {
     }
 }
 
-fn compute_index(indices: &[usize], strides: &[usize]) -> usize {
+fn compute_index(indices: &[usize], strides: &[usize], base_offset: usize) -> usize {
     if indices.len() != strides.len() {
         panic!(
             "Indices length ({}) does not match NdArray dimensions ({})",
@@ -400,7 +574,7 @@ fn compute_index(indices: &[usize], strides: &[usize]) -> usize {
 
     indices.iter()
         .enumerate()
-        .fold(0, |acc, (axis, &x)| acc + x * strides[axis])
+        .fold(0, |acc, (axis, &x)| acc + x * strides[axis]) + base_offset
 }
 
 fn validate_view(old_shape: &[usize], view_shape: &[usize], view_stride: &[usize]) -> Result<(), NdArrayError> {
@@ -767,8 +941,8 @@ pub fn broadcast_array<'a, 'b, 'c: 'a, 'd: 'b, L, R>(lhs: &'c impl NdArrayLike<L
             let lhs_strides = compute_broadcast_strides(lhs.shape(), lhs.strides(), &lhs_shape)?;
             let rhs_strides = compute_broadcast_strides(rhs.shape(), rhs.strides(), &rhs_shape)?;
 
-            Ok((NdArrayView::new(lhs.data(), lhs.shape(), lhs_shape, lhs_strides),
-                NdArrayView::new(rhs.data(), rhs.shape(), rhs_shape, rhs_strides)))
+            Ok((NdArrayView::new(lhs.data(), lhs.shape(), lhs_shape, lhs_strides, lhs.base_offset()),
+                NdArrayView::new(rhs.data(), rhs.shape(), rhs_shape, rhs_strides, lhs.base_offset())))
         }
         Err(e) => Err(e)
     }
@@ -1440,11 +1614,11 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
             Err(e) => panic!("{e:?}")
         };
 
-        let lhs = match lhs.broadcast_to(&broadcast_batch_shape.clone().concat(lhs_data_shape)) {
+        let lhs = match lhs.broadcast_to(broadcast_batch_shape.clone().concat(lhs_data_shape)) {
             Ok(x) => x,
             Err(e) => panic!("{e:?}")
         };
-        let rhs = match rhs.broadcast_to(&broadcast_batch_shape.clone().concat(rhs_data_shape)) {
+        let rhs = match rhs.broadcast_to(broadcast_batch_shape.clone().concat(rhs_data_shape)) {
             Ok(x) => x,
             Err(e) => panic!("{e:?}")
         };
@@ -1457,6 +1631,7 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
         let data_shape: NdArrayIndex = data_shape.into();
         let mut data: Vec<L> = Vec::with_capacity(data_shape.iter().product());
         let data_stride: NdArrayIndex = compute_stride(&data_shape);
+        let data_offset = 0;
 
         for batch_size_index in IndexIterator::iter_shape(&broadcast_batch_shape) {
             for i in 0..m {
@@ -1488,12 +1663,12 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
                     }
 
                     assert_eq!(tmp_ret.len(), 1);
-                    data[compute_index(&data_index, &data_stride)] = tmp_ret.pop().unwrap();
+                    data[compute_index(&data_index, &data_stride, data_offset)] = tmp_ret.pop().unwrap();
                 }
             }
         }
 
-        NdArray::new_shape_with_strides(data.into_boxed_slice(), data_shape, data_stride)
+        NdArray::new_array(data.into_boxed_slice(), data_shape, data_stride, data_offset)
     } else {
         panic!(
             "Unexcept shape, lhs shape len and rhs shape len must greater than 0. lhs shape: {:?}, rhs shape: {:?}",
@@ -1552,7 +1727,16 @@ where Idx: Into<NdArrayIndex> {
     type Output = T;
 
     fn index(&self, index: Idx) -> &Self::Output {
-        self.data.index(self.compute_index(&index.into()))
+        &self.data[self.compute_index(&index.into())]
+    }
+}
+
+impl <'a, T, Idx> Index<Idx> for NdArrayView<'a, T>
+where Idx: Into<NdArrayIndex> {
+    type Output = T;
+
+    fn index(&self, index: Idx) -> &Self::Output {
+        &self.data[self.compute_index(&index.into())]
     }
 }
 
@@ -1576,7 +1760,7 @@ impl <'a> Iterator for NdArrayDataIndexIterator<'a> {
         match self.iter.next() {
             None => None,
             Some(index) => {
-                let i = compute_index(&index, self.data_strides);
+                let i = compute_index(&index, self.data_strides, self.data_offset);
                 if i >= self.data_len {
                     panic!(
                         "Index out of bounds. Index: {:?}, array shape: {:?}, array strides: {:?}. array data len: {}",
@@ -1619,7 +1803,7 @@ impl <'a> Iterator for NdArrayFastDataIndexIterator<'a> {
             return None;
         }
 
-        let ret = compute_index(&self.index, self.data_strides);
+        let ret = compute_index(&self.index, self.data_strides, self.data_offset);
 
         if ret >= self.data_len {
             panic!(
@@ -1688,7 +1872,7 @@ impl <T: Clone> From<Vec<T>> for NdArray<T> {
 
 impl <T> From<Scalar<T>> for NdArray<T> {
     fn from(data: Scalar<T>) -> Self {
-        NdArray::new_shape_with_strides(Box::new([data.0]), index![1], index![1])
+        NdArray::new_array(Box::new([data.0]), index![1], index![1], 0)
     }
 }
 
@@ -1717,10 +1901,11 @@ where NT: From<T> {
     type Target = NdArray<NT>;
 
     fn cast(self) -> Self::Target {
-        NdArray::new_shape_with_strides(
+        NdArray::new_array(
             self.data.into_iter().map(|x| x.into()).collect(),
             self.shape,
             self.strides,
+            self.base_offset
         )
     }
 }
