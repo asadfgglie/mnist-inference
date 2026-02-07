@@ -1,7 +1,8 @@
 use std::cmp::max;
 use std::iter::zip;
-pub use ndarray_marco::slice;
 use crate::{NdArrayError, NdArrayIndex, NdArrayLike, NdArrayView};
+
+pub use ndarray_marco::slice;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum AxisSlice {                                        // py means    rust means
