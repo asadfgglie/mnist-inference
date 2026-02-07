@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 use crate::array::{NdArray, NdArrayView};
+use crate::error::NdArrayError;
 use crate::NdArrayLike;
 use crate::NdArrayIndex;
 use crate::axis::compute_index;
@@ -47,47 +48,55 @@ pub struct IndexIterator<'a> {
 }
 
 impl <'a, T: NdArrayLike<DT>, DT> NdArrayIterator<'a, T, DT> {
-    pub fn new<'b: 'a>(array: &'b T) -> Self {
-        Self {
+    pub fn new<'b: 'a>(array: &'b T) -> Result<Self, NdArrayError> {
+        Ok(Self {
             data: array,
-            index_iter: NdArrayFastDataIndexIterator::iter_index(array.shape(), array.strides(), array.base_offset()),
+            index_iter: NdArrayFastDataIndexIterator::iter_index(array.shape(), array.strides(), array.base_offset())?,
             _marker: PhantomData,
-        }
+        })
     }
 }
 
 impl <'a> NdArrayDataIndexIterator<'a> {
-    pub fn new<'b: 'a, T>(array: &'b impl NdArrayLike<T>) -> Self {
-        Self {
+    pub fn new<'b: 'a, T>(array: &'b impl NdArrayLike<T>) -> Result<Self, NdArrayError> {
+        Ok(Self {
             data_len: array.data().len(),
             data_strides: array.strides(),
-            iter: IndexIterator::iter_shape(array.shape()),
+            iter: IndexIterator::iter_shape(array.shape())?,
             data_offset: array.base_offset(),
-        }
+        })
     }
 }
 
 impl <'a> NdArrayFastDataIndexIterator<'a> {
-    pub fn iter_index<'b: 'a>(shape: &'b [usize], strides: &'b [usize], offset: usize) -> Self {
-        Self {
-            data_len: shape.iter().product(),
-            data_strides: strides,
-            data_shape: shape,
-            index: NdArrayIndex::zeros(shape.len()),
-            axis_counter: shape.len() - 1,
-            has_done: false,
-            data_offset: offset,
+    pub fn iter_index<'b: 'a>(shape: &'b [usize], strides: &'b [usize], offset: usize) -> Result<Self, NdArrayError> {
+        if shape.len() > 0 {
+            Ok(Self {
+                data_len: shape.iter().product(),
+                data_strides: strides,
+                data_shape: shape,
+                index: NdArrayIndex::zeros(shape.len()),
+                axis_counter: shape.len() - 1,
+                has_done: false,
+                data_offset: offset,
+            })
+        } else { 
+            Err(NdArrayError::InvalidShapeError("shape is empty!".into()))
         }
     }
 }
 
 impl <'a> IndexIterator<'a> {
-    pub fn iter_shape<'b: 'a>(shape: &'b [usize]) -> Self {
-        Self {
-            index: NdArrayIndex::zeros(shape.len()),
-            axis_counter: shape.len() - 1,
-            has_done: false,
-            data_shape: shape,
+    pub fn iter_shape<'b: 'a>(shape: &'b [usize]) -> Result<Self, NdArrayError> {
+        if shape.len() > 0 {
+            Ok(Self {
+                index: NdArrayIndex::zeros(shape.len()),
+                axis_counter: shape.len() - 1,
+                has_done: false,
+                data_shape: shape,
+            })
+        } else { 
+            Err(NdArrayError::InvalidShapeError("shape is empty!".into()))
         }
     }
 }
@@ -205,7 +214,7 @@ macro_rules! impl_nd_array_iter {
                 type IntoIter = NdArrayIterator<'b, $type, T>;
 
                 fn into_iter(self) -> Self::IntoIter {
-                    NdArrayIterator::new(self)
+                    NdArrayIterator::new(self).expect("this should not panic")
                 }
             }
         )+

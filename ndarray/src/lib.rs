@@ -1,4 +1,4 @@
-use ndarray_marco::nd_array_index;
+use ndarray_macro::nd_array_index;
 use std::cmp::PartialEq;
 use std::ops::DerefMut;
 use crate::axis::{compute_broadcast_strides, compute_index, compute_reshape_strides, compute_shape_block};
@@ -40,7 +40,7 @@ pub trait NdArrayLike<T> {
     }
     fn iter_index<'a>(&'a self) -> NdArrayDataIndexIterator<'a>
     where Self: Sized, T: 'a {
-        NdArrayDataIndexIterator::new(self)
+        NdArrayDataIndexIterator::new(self).expect("this should not happen")
     }
 
     // shape-related op
@@ -118,6 +118,15 @@ pub trait NdArrayLike<T> {
         permutation[axis1] = permutation[axis2];
         permutation[axis2] = tmp;
         self.permute(permutation)
+    }
+    
+    // element-wise op
+    fn map<'a, 'b: 'a, RT>(&'b self, f: impl Fn(&T) -> RT) -> NdArray<RT> where Self: Sized {
+        let mut data = Vec::with_capacity(self.shape().iter().product::<usize>());
+        for indices in self.iter_index().collect::<Vec<NdArrayIndex>>() {
+            data.push(f(&self.data()[self.compute_index(&indices)]));
+        }
+        NdArray::new_shape_with_index(data, self.shape().into())
     }
 
     fn slice<'a, 'b: 'a>(&'b self, slices: &[AxisSlice]) -> Result<NdArrayView<'a, T>, NdArrayError> {

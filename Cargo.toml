@@ -10,5 +10,5 @@ ndarray = { path = "./ndarray" }
 members = [
     ".",
     "ndarray",
-    "ndarray/ndarray-marco",
+    "ndarray/ndarray-macro",
 ]

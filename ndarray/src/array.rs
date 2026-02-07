@@ -156,6 +156,12 @@ impl <T> NdArray<T> {
         permutation[axis2] = tmp;
         Self::permute_array(array, permutation)
     }
+    
+    pub fn map_self(&mut self, f: impl Fn(&T) -> T) {
+        for indices in self.iter_index().collect::<Vec<_>>() {
+            self[indices] = f(&self[indices.clone()]);
+        }
+    }
 
     pub fn item(self) -> Result<Scalar<T>, NdArrayError> {
         if self.shape != NdArrayIndex::Dim1([1]) {
@@ -213,7 +219,7 @@ impl <T: Clone> NdArray<T> {
                 }
             },
             None => {
-                panic!("Index out of bounds, shape: {:?}, axis: {axis}", array.shape())
+                Err(NdArrayError::ReshapeError(format!("Index out of bounds, shape: {:?}, axis: {axis}", array.shape())))
             }
         }
     }
@@ -233,7 +239,7 @@ impl <T: Clone> NdArray<T> {
                 Self::reshape_array(array, shape.into())
             },
             false => {
-                panic!("Index out of bounds, shape: {:?}, axis: {axis}", array.shape())
+                Err(NdArrayError::ReshapeError(format!("Index out of bounds, shape: {:?}, axis: {axis}", array.shape())))
             }
         }
     }

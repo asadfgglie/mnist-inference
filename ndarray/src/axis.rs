@@ -2,7 +2,7 @@ use std::cmp::max;
 use std::iter::zip;
 use crate::{NdArrayError, NdArrayIndex, NdArrayLike, NdArrayView};
 
-pub use ndarray_marco::slice;
+pub use ndarray_macro::slice;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum AxisSlice {                                        // py means    rust means
@@ -317,7 +317,7 @@ pub fn broadcast_array<'a, 'b, 'c: 'a, 'd: 'b, L, R>(lhs: &'c impl NdArrayLike<L
             let rhs_strides = compute_broadcast_strides(rhs.shape(), rhs.strides(), &rhs_shape)?;
 
             Ok((NdArrayView::new(lhs.data(), lhs_shape, lhs_strides, lhs.base_offset()),
-                NdArrayView::new(rhs.data(), rhs_shape, rhs_strides, lhs.base_offset())))
+                NdArrayView::new(rhs.data(), rhs_shape, rhs_strides, rhs.base_offset())))
         }
         Err(e) => Err(e)
     }
@@ -338,7 +338,9 @@ pub(crate) fn compute_index(indices: &[usize], strides: &[usize], base_offset: u
 }
 
 pub(crate) fn validate_view(data_bound: usize, view_offset: usize, view_shape: &[usize], view_stride: &[usize]) -> Result<(), NdArrayError> {
-    if view_shape.len() != view_stride.len() {
+    if view_shape.contains(&0) {
+        Err(NdArrayError::InvalidShapeError("shape contains 0 is not allowed.".into()))
+    } else if view_shape.len() != view_stride.len() {
         Err(NdArrayError::InvalidStridesError(format!(
             "view_shape.len() ({}) != view_stride.len() ({})", view_shape.len(), view_stride.len()
         )))

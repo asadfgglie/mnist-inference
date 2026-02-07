@@ -111,7 +111,7 @@ pub fn matmul<L: Clone + Mul<Output=L> + Add<Output=L>, R: Into<L> + Clone>(lhs:
         let data_stride: NdArrayIndex = compute_stride(&data_shape);
         let data_offset = 0;
 
-        for batch_size_index in IndexIterator::iter_shape(&broadcast_batch_shape) {
+        for batch_size_index in IndexIterator::iter_shape(&broadcast_batch_shape).expect("this should not happen") {
             for i in 0..m {
                 for j in 0..n {
                     let mut data_index = batch_size_index.to_vec();

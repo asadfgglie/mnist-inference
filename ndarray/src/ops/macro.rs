@@ -306,7 +306,7 @@ macro_rules! assign_op {
 
                     self.contiguous_self();
 
-                    for indices in IndexIterator::iter_shape(self.shape()).collect::<Vec<_>>() {
+                    for indices in self.iter_index().collect::<Vec<_>>() {
                         self[indices.clone()] $op rhs[indices].clone().into();
                     }
                 }
@@ -348,7 +348,7 @@ macro_rules! ref_assign_op {
 
                     self.contiguous_self();
 
-                    for indices in IndexIterator::iter_shape(self.shape()).collect::<Vec<_>>() {
+                    for indices in self.iter_index().collect::<Vec<_>>() {
                         self[indices.clone()] $op rhs[indices].clone().into();
                     }
                 }
