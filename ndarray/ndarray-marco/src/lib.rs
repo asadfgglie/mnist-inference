@@ -1,5 +1,3 @@
-mod ops;
-
 use proc_macro::TokenStream;
 use quote::{format_ident, quote, ToTokens};
 use syn::parse::{Parse, ParseStream, Result};
