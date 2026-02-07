@@ -1,7 +1,7 @@
 use std::cmp::{max, PartialEq};
 use std::iter::zip;
 use std::marker::PhantomData;
-use std::ops::{Add, AddAssign, Deref, DerefMut, Div, DivAssign, Index, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Deref, DerefMut, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
 use ndarray_marco::nd_array_index;
 pub use ndarray_marco::slice;
 
@@ -225,6 +225,10 @@ pub trait NdArrayLike<T> {
                         return Err(NdArrayError::SliceError(format!(
                             "Invalid slice, start index: {start}, end index: {end}",
                         )))
+                    }
+
+                    if step == 0 {
+                        return Err(NdArrayError::SliceError("Invalid slice 0 step".into()))
                     }
 
                     shape.push((end - start).div_ceil(step));
@@ -1224,10 +1228,8 @@ macro_rules! assign_op {
 
                     self.contiguous_self();
 
-                    let iter: Vec<NdArrayIndex> = self.iter_index().collect();
-                    for indices in iter {
-                        let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
-                        self.data[self_index] $op rhs.data()[rhs_index].clone().into();
+                    for indices in IndexIterator::iter_shape(self.shape()).collect::<Vec<_>>() {
+                        self[indices.clone()] $op rhs[indices].clone().into();
                     }
                 }
             }
@@ -1267,10 +1269,8 @@ macro_rules! ref_assign_op {
 
                     self.contiguous_self();
 
-                    let iter: Vec<NdArrayIndex> = self.iter_index().collect();
-                    for indices in iter {
-                        let (self_index, rhs_index) = (self.compute_index(&indices), rhs.compute_index(&indices));
-                        self.data[self_index] $op rhs.data()[rhs_index].clone().into();
+                    for indices in IndexIterator::iter_shape(self.shape()).collect::<Vec<_>>() {
+                        self[indices.clone()] $op rhs[indices].clone().into();
                     }
                 }
             }
@@ -1658,7 +1658,7 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
                         rhs_index.push(k);
                         rhs_index.push(j);
 
-                        let tmp = lhs.data()[lhs.compute_index(&lhs_index)].clone() * rhs.data()[rhs.compute_index(&rhs_index)].clone().into();
+                        let tmp = lhs[lhs_index].clone() * rhs[rhs_index].clone().into();
                         match tmp_ret.is_empty() {
                             true => tmp_ret.push(tmp),
                             false => {
@@ -1734,6 +1734,13 @@ where Idx: Into<NdArrayIndex> {
 
     fn index(&self, index: Idx) -> &Self::Output {
         &self.data[self.compute_index(&index.into())]
+    }
+}
+
+impl <T, Idx> IndexMut<Idx> for NdArray<T>
+where Idx: Into<NdArrayIndex> {
+    fn index_mut(&mut self, index: Idx) -> &mut Self::Output {
+        &mut self.data[self.compute_index(&index.into())]
     }
 }
 
