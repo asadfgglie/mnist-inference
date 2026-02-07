@@ -1557,7 +1557,7 @@ general_no_eco_op_scalar!{(%, Rem, rem), (/, Div, div)}
 general_eco_op_scalar!{*, Mul, mul}
 assign_scalar_op!{(*=, MulAssign, mul_assign), (%=, RemAssign, rem_assign), (/=, DivAssign, div_assign)}
 
-pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayLike<L>, rhs: & impl NdArrayLike<R>) -> NdArray<L> {
+pub fn matmul<L: Clone + Mul<Output=L> + Add<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayLike<L>, rhs: & impl NdArrayLike<R>) -> NdArray<L> {
     if lhs.shape().len() == 1 && rhs.shape().len() == 1 { // vector dot product
         if lhs.shape() != rhs.shape() {
             panic!(
@@ -1574,7 +1574,7 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
                 true => ret.push(tmp),
                 false => {
                     let v = ret.pop().unwrap();
-                    ret.push(v * tmp);
+                    ret.push(v + tmp);
                 }
             }
         }
@@ -1663,7 +1663,7 @@ pub fn matmul<L: Clone + Mul<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayL
                             true => tmp_ret.push(tmp),
                             false => {
                                 let v = tmp_ret.pop().unwrap();
-                                tmp_ret.push(v * tmp);
+                                tmp_ret.push(v + tmp);
                             }
                         }
                     }
