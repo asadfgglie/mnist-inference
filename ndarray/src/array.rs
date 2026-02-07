@@ -79,6 +79,8 @@ impl <'a: 'b, 'b, T> NdArrayLike<T> for &'b NdArrayView<'a, T> {
     }
 }
 
+/// Shape-related api will do the same thing as `NdArrayLike` trait when success
+/// and then return `NdArray`, not `NdArrayView`.
 impl <T> NdArray<T> {
     pub fn new_array(data: Box<[T]>, shape: NdArrayIndex, strides: NdArrayIndex, base_offset: usize) -> Self {
         if data.len() != shape.iter().product() {
@@ -118,26 +120,23 @@ impl <T> NdArray<T> {
     }
 
     // shape-related op
-    pub fn broadcast_array_to(array: Self, shape: NdArrayIndex) -> Self {
-        let stride = match compute_broadcast_strides(array.shape(), array.strides(), &shape) {
-            Ok(s) => s,
-            Err(e) => panic!("{:?}", e)
-        };
-        Self::new_array(array.data, shape, stride, array.base_offset)
+    pub fn broadcast_array_to(array: Self, shape: NdArrayIndex) -> Result<Self, NdArrayError> {
+        let stride = compute_broadcast_strides(array.shape(), array.strides(), &shape)?;
+        Ok(Self::new_array(array.data, shape, stride, array.base_offset))
     }
-    pub fn permute_array(array: Self, permutation: NdArrayIndex) -> Self {
+    pub fn permute_array(array: Self, permutation: NdArrayIndex) -> Result<Self, NdArrayError> {
         if array.shape().len() != permutation.len() {
-            panic!(
+            return Err(NdArrayError::PermuteError(format!(
                 "Illegal shape permutation. target permutation {permutation:?}, old shape: {:?}",
                 array.shape(),
-            )
+            )))
         }
 
         for axis in 0..array.shape().len() {
             if !permutation.contains(&axis) {
-                panic!(
+                return Err(NdArrayError::PermuteError(format!(
                     "axis {axis} not found in target permutation {permutation:?}"
-                )
+                )))
             }
         }
 
@@ -148,9 +147,9 @@ impl <T> NdArray<T> {
             stride[axis] = array.strides()[permutation[axis]];
         }
 
-        Self::new_array(array.data, shape, stride, array.base_offset)
+        Ok(Self::new_array(array.data, shape, stride, array.base_offset))
     }
-    pub fn transpose_array(array: Self, axis1: usize, axis2: usize) -> Self {
+    pub fn transpose_array(array: Self, axis1: usize, axis2: usize) -> Result<Self, NdArrayError> {
         let mut permutation: NdArrayIndex = (0..array.shape().len()).collect::<Vec<usize>>().into();
         let tmp = permutation[axis1];
         permutation[axis1] = permutation[axis2];
@@ -168,7 +167,7 @@ impl <T> NdArray<T> {
             "self.shape: {:?}, self.stride: {:?}, self.data.len: {}",
             self.shape, self.strides, self.data.len()
         );
-        Ok(self.data.into_vec().pop().unwrap_or_else(|| panic!("self.data seems empty, but this should not happen. {}", self_info)).into())
+        Ok(self.data.into_vec().pop().unwrap_or_else(|| panic!("this should not happen. {}", self_info)).into())
     }
 }
 
@@ -192,24 +191,21 @@ impl <T: Clone> NdArray<T> {
     }
 
     // shape-related op
-    pub fn reshape_array(array: Self, shape: NdArrayIndex) -> Self {
-        if array.shape().iter().product::<usize>() != shape.iter().product() {
-            panic!("Invalid shape ({:?}) does not match data len ({}).", shape, array.data.len());
-        }
+    pub fn reshape_array(array: Self, shape: NdArrayIndex) -> Result<Self, NdArrayError> {
         match compute_reshape_strides(array.shape(), array.strides(), &shape) {
-            Ok(stride) => Self::new_array(array.data, shape, stride, array.base_offset),
+            Ok(stride) => Ok(Self::new_array(array.data, shape, stride, array.base_offset)),
             Err(NdArrayError::IncompatibleReshapeError(_)) => {
                 Self::reshape_array(array.contiguous(), shape)
             },
-            Err(e) => panic!("{:?}", e)
+            Err(e) => Err(e)
         }
 
     }
-    pub fn squeeze_array(array: Self, axis: usize) -> Self {
+    pub fn squeeze_array(array: Self, axis: usize) -> Result<Self, NdArrayError> {
         match array.shape().get(axis) {
             Some(v) => {
                 if *v != 1 {
-                    array
+                    Ok(array)
                 } else {
                     let mut shape = array.shape().to_vec();
                     shape.remove(axis);
@@ -221,7 +217,7 @@ impl <T: Clone> NdArray<T> {
             }
         }
     }
-    pub fn unsqueeze_array(array: Self, axis: usize) -> Self {
+    pub fn unsqueeze_array(array: Self, axis: usize) -> Result<Self, NdArrayError> {
         match axis <= array.shape().len() {
             true => {
                 let mut shape = Vec::with_capacity(array.shape().len() + 1);

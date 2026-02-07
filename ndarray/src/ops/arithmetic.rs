@@ -3,7 +3,7 @@ use crate::axis::{compute_stride, broadcast_array, broadcast_shapes, compute_ind
 use crate::iterator::IndexIterator;
 use crate::scalar::Scalar;
 use crate::{assign_op, assign_scalar_op, eco_op_scalar, general_assign_op, general_eco_op_scalar,
-            general_no_eco_op_scalar, general_op, no_eco_op_scalar, op, ref_assign_op, ref_eco_op_scalar, 
+            general_no_eco_op_scalar, general_op, no_eco_op_scalar, op, ref_assign_op, ref_eco_op_scalar,
             ref_no_eco_op_scalar, ref_op, ref_view_op, scalar_assign_op, scalar_op};
 use crate::{NdArrayIndex, NdArrayLike};
 use std::iter::zip;
@@ -60,7 +60,7 @@ pub fn matmul<L: Clone + Mul<Output=L> + Add<Output=L>, R: Into<L> + Clone>(lhs:
         };
         let ret = matmul(&lhs, rhs);
         let axis = ret.shape().len() - 2;
-        NdArray::squeeze_array(ret, axis)
+        NdArray::squeeze_array(ret, axis).expect("squeeze this array should not panic")
     } else if lhs.shape().len() > 1 && rhs.shape().len() == 1 {
         let rhs = match rhs.unsqueeze(1) {
             Ok(r) => r,
@@ -68,7 +68,7 @@ pub fn matmul<L: Clone + Mul<Output=L> + Add<Output=L>, R: Into<L> + Clone>(lhs:
         };
         let ret = matmul(lhs, &rhs);
         let axis = ret.shape().len() - 1;
-        NdArray::squeeze_array(ret, axis)
+        NdArray::squeeze_array(ret, axis).expect("squeeze this array should not panic")
     } else if lhs.shape().len() > 1 && rhs.shape().len() > 1 {
         let shape_split = |shape: &[usize]| {
             match shape.len() > 2 {
