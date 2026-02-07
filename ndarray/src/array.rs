@@ -1,7 +1,7 @@
-use std::ops::{Index, IndexMut};
-use crate::{Cast, NdArrayError, NdArrayIndex, NdArrayLike};
-use crate::ops::arithmetic::{compute_broadcast_strides, compute_reshape_strides, compute_stride, validate_contiguous_stride, validate_view};
+use crate::axis::{compute_broadcast_strides, compute_reshape_strides, compute_stride, validate_view};
 use crate::scalar::Scalar;
+use crate::{Cast, NdArrayError, NdArrayIndex, NdArrayLike};
+use std::ops::{Index, IndexMut};
 
 #[derive(Debug, PartialEq)]
 pub struct NdArray<T> {
@@ -86,22 +86,14 @@ impl <T> NdArray<T> {
                    data.len(), shape, shape.iter().product::<usize>());
         }
 
-        match validate_contiguous_stride(&shape, &strides) {
+        match validate_view(&shape, &shape, &strides) {
             Ok(_) => Self {
                 data,
                 shape,
                 strides,
                 base_offset,
             },
-            Err(_) => match validate_view(&shape, &shape, &strides) {
-                Ok(_) => Self {
-                    data,
-                    shape,
-                    strides,
-                    base_offset,
-                },
-                Err(e) => panic!("{:?}", e)
-            }
+            Err(e) => panic!("{:?}", e)
         }
     }
     pub fn new_shape_with_index(data: Vec<T>, shape: NdArrayIndex) -> Self {

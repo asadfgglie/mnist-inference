@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 use crate::array::{NdArray, NdArrayView};
 use crate::NdArrayLike;
 use crate::NdArrayIndex;
-use crate::ops::arithmetic::compute_index;
+use crate::axis::compute_index;
 
 
 pub struct NdArrayIterator<'a, T: NdArrayLike<DT>, DT> {

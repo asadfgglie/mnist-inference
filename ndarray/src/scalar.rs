@@ -1,6 +1,6 @@
-use std::ops::{Add, AddAssign, Deref, DerefMut, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
 use crate::array::NdArray;
-use crate::{scalar_assign_op, scalar_op, Cast, NdArrayIndex};
+use crate::{Cast, NdArrayIndex};
+use std::ops::{Deref, DerefMut};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Scalar<T>(pub T);
@@ -40,10 +40,4 @@ where T: Into<NT> {
     fn cast(self) -> Self::Target {
         Scalar(self.0.into())
     }
-}
-
-scalar_op!{(+, Add, add), (-, Sub, sub), (*, Mul, mul), (/, Div, div), (%, Rem, rem)}
-scalar_assign_op!{
-    (+=, AddAssign, add_assign), (-=, SubAssign, sub_assign), (*=, MulAssign, mul_assign),
-    (/=, DivAssign, div_assign), (%=, RemAssign, rem_assign)
 }

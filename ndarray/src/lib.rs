@@ -1,13 +1,13 @@
 use ndarray_marco::nd_array_index;
 use std::cmp::PartialEq;
 use std::ops::DerefMut;
-use crate::ops::arithmetic::{compute_broadcast_strides, compute_index, compute_reshape_strides, compute_shape_block};
+use crate::axis::{compute_broadcast_strides, compute_index, compute_reshape_strides, compute_shape_block};
 
-pub use crate::axis::{AxisSlice, slice};
+pub use crate::axis::{AxisSlice, slice, broadcast_shapes, broadcast_array};
 pub use crate::error::NdArrayError;
 pub use crate::scalar::Scalar;
 pub use crate::array::{NdArray, NdArrayView};
-pub use crate::ops::arithmetic::{broadcast_shapes, broadcast_array, matmul};
+pub use crate::ops::arithmetic::matmul;
 pub use crate::iterator::{NdArrayIterator, NdArrayDataIndexIterator, NdArrayFastDataIndexIterator, IndexIterator};
 
 nd_array_index!{8}
