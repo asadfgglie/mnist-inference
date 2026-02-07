@@ -28,10 +28,10 @@ pub enum AxisSlice {                                        // py means    rust 
     Index(usize),                                           // 0
     Range { start: usize, end: usize },                     // 1:3      or 1..3
     RangeFrom { start: usize },                             // 1:       or 1..
-    RangeFromStep { start: usize, step: usize },            // 1::2     or 1..:2
+    RangeFromStep { start: usize, step: usize },            // 1::2     or (1..).step_by(2)
     RangeTo { end: usize },                                 // :3       or ..3
-    RangeToStep { end: usize, step: usize },                // :3:2     or ..3:2
-    RangeStep { start: usize, end: usize, step: usize },    // 1:10:2   or 1..10:2
+    RangeToStep { end: usize, step: usize },                // :3:2     or (..3).step_by(2)
+    RangeStep { start: usize, end: usize, step: usize },    // 1:10:2   or (1..10).step_by(2)
 }
 
 pub struct NdArrayIterator<'a, T: NdArrayLike<DT>, DT> {
