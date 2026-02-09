@@ -413,7 +413,7 @@ impl<T> View for &NdArrayView<'_, T> where T: HasDtype {
 
     fn data(&self) -> Cow<'_, [u8]> {
         if !self.is_contiguous() {
-            panic!("Non-contiguous NdArray cannot be serialized to safetensors");
+            panic!("Non-contiguous NdArrayView cannot be serialized to safetensors");
         }
 
         let bytes = unsafe {
