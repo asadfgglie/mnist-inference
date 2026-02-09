@@ -158,7 +158,7 @@ pub(crate) fn compute_reshape_strides(old_shape: &[usize], old_stride: &[usize],
         )))
     }
 
-    if old_shape.iter().product::<usize>() != reshape.iter().product() {
+    if old_shape.iter().product::<usize>() != reshape.iter().product::<usize>() {
         return Err(NdArrayError::ReshapeError(format!(
             "Unable turn shape {:?} ({}) into new shape {:?} ({}) since element number mismatch.",
             old_shape, old_shape.iter().product::<usize>(), reshape, reshape.iter().product::<usize>()

@@ -1,7 +1,10 @@
+use std::borrow::Cow;
 use crate::axis::{compute_broadcast_strides, compute_reshape_strides, compute_stride, validate_view};
 use crate::scalar::Scalar;
-use crate::{Cast, NdArrayError, NdArrayIndex, NdArrayLike};
+use crate::{Cast, HasDtype, NdArrayError, NdArrayIndex, NdArrayLike};
+use safetensors::tensor::TensorView;
 use std::ops::{Index, IndexMut};
+use safetensors::{Dtype, View};
 
 #[derive(Debug, PartialEq)]
 pub struct NdArray<T> {
@@ -83,7 +86,7 @@ impl <'a: 'b, 'b, T> NdArrayLike<T> for &'b NdArrayView<'a, T> {
 /// and then return `NdArray`, not `NdArrayView`.
 impl <T> NdArray<T> {
     pub fn new_array(data: Box<[T]>, shape: NdArrayIndex, strides: NdArrayIndex, base_offset: usize) -> Self {
-        if data.len() != shape.iter().product() {
+        if data.len() != shape.iter().product::<usize>() {
             panic!("Data length ({}) does not match shape dimensions ({:?}), shape except {} length data.",
                    data.len(), shape, shape.iter().product::<usize>());
         }
@@ -156,7 +159,7 @@ impl <T> NdArray<T> {
         permutation[axis2] = tmp;
         Self::permute_array(array, permutation)
     }
-    
+
     pub fn map_self(&mut self, f: impl Fn(&T) -> T) {
         for indices in self.iter_index().collect::<Vec<_>>() {
             self[indices] = f(&self[indices.clone()]);
@@ -313,5 +316,117 @@ impl <T: Clone> From<NdArrayView<'_, T>> for NdArray<T> {
         let mut data = Vec::with_capacity(value.shape.iter().product());
         data.extend(value.into_iter().cloned());
         Self::new_shape_with_index(data, value.shape)
+    }
+}
+
+impl <'a, T> TryFrom<TensorView<'a>> for NdArrayView<'a, T>
+where T: HasDtype {
+    type Error = NdArrayError;
+
+    fn try_from(value: TensorView<'a>) -> Result<Self, Self::Error> {
+        if value.dtype() != T::DTYPE {
+            return Err(NdArrayError::DtypeMismatch(format!(
+                "Tensor dtype mismatch, expected {:?}, got {:?}",
+                T::DTYPE, value.dtype())));
+        }
+
+        let shape: NdArrayIndex = value.shape().into();
+        let elements: usize = shape.iter().product();
+
+        let expected_bytes = elements * size_of::<T>();
+        if value.data().len() != expected_bytes {
+            return Err(NdArrayError::InvalidBufferSize(format!(
+                "Tensor size mismatch, expected {:?}, got {:?}",
+                expected_bytes, value.data().len()
+            )));
+        }
+
+        let ptr = value.data().as_ptr();
+        if ptr.align_offset(align_of::<T>()) != 0 {
+            return Err(NdArrayError::Misaligned(format!(
+                "Tensor alignment mismatch, expected {:?}, got {:?}",
+                align_of::<T>(), ptr.align_offset(align_of::<T>())
+            )));
+        }
+
+        let strides = compute_stride(&shape);
+
+        let typed_slice: &'a [T] = unsafe {
+            std::slice::from_raw_parts(ptr as *const T, elements)
+        };
+
+        Ok(NdArrayView::new(
+            typed_slice,
+            shape,
+            strides,
+            0,
+        ))
+    }
+}
+
+impl <'a, T> TryFrom<TensorView<'a>> for NdArray<T>
+where T: HasDtype + Clone {
+    type Error = NdArrayError;
+
+    fn try_from(value: TensorView<'a>) -> Result<Self, Self::Error> {
+        Ok(NdArrayView::try_from(value)?.into())
+    }
+}
+
+impl<T> View for &NdArray<T> where T: HasDtype {
+    fn dtype(&self) -> Dtype {
+        T::DTYPE
+    }
+
+    fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    fn data(&self) -> Cow<'_, [u8]> {
+        if !self.is_contiguous() {
+            panic!("Non-contiguous NdArray cannot be serialized to safetensors");
+        }
+
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                self.data.as_ptr() as *const u8,
+                self.data.len() * size_of::<T>(),
+            )
+        };
+
+        Cow::Borrowed(bytes)
+    }
+
+    fn data_len(&self) -> usize {
+        View::data(self).len()
+    }
+}
+
+impl<T> View for &NdArrayView<'_, T> where T: HasDtype {
+    fn dtype(&self) -> Dtype {
+        T::DTYPE
+    }
+
+    fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    fn data(&self) -> Cow<'_, [u8]> {
+        if !self.is_contiguous() {
+            panic!("Non-contiguous NdArray cannot be serialized to safetensors");
+        }
+
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                self.data.as_ptr() as *const u8,
+                self.data.len() * size_of::<T>(),
+            )
+        };
+
+        Cow::Borrowed(bytes)
+    }
+
+    fn data_len(&self) -> usize {
+        View::data(self).len()
     }
 }

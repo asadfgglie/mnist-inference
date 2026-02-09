@@ -7,4 +7,7 @@ pub enum NdArrayError {
     IncompatibleReshapeError(String),
     InvalidStridesError(String),
     InvalidShapeError(String),
+    DtypeMismatch(String),
+    InvalidBufferSize(String),
+    Misaligned(String),
 }

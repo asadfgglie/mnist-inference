@@ -119,7 +119,7 @@ pub trait NdArrayLike<T> {
         permutation[axis2] = tmp;
         self.permute(permutation)
     }
-    
+
     // element-wise op
     fn map<'a, 'b: 'a, RT>(&'b self, f: impl Fn(&T) -> RT) -> NdArray<RT> where Self: Sized {
         let mut data = Vec::with_capacity(self.shape().iter().product::<usize>());
@@ -206,6 +206,10 @@ pub trait NdArrayLike<T> {
     }
 }
 
+pub trait HasDtype {
+    const DTYPE: safetensors::Dtype;
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -215,3 +219,4 @@ pub mod error;
 pub mod ops;
 pub mod scalar;
 pub mod iterator;
+pub mod dtype;

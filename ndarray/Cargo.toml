@@ -5,3 +5,7 @@ edition = "2024"
 
 [dependencies]
 ndarray-macro = { path = "./ndarray-macro" }
+safetensors = "0"
+half = "2"
+float8 = "0"
+num-complex = "0"
