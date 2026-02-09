@@ -390,7 +390,7 @@ impl<T> View for &NdArray<T> where T: HasDtype {
         let bytes = unsafe {
             std::slice::from_raw_parts(
                 self.data.as_ptr() as *const u8,
-                self.data.len() * size_of::<T>(),
+                size_of_val(&self.data),
             )
         };
 
@@ -419,7 +419,7 @@ impl<T> View for &NdArrayView<'_, T> where T: HasDtype {
         let bytes = unsafe {
             std::slice::from_raw_parts(
                 self.data.as_ptr() as *const u8,
-                self.data.len() * size_of::<T>(),
+                size_of_val(self.data),
             )
         };
 

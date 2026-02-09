@@ -5,6 +5,11 @@ edition = "2024"
 
 [dependencies]
 ndarray = { path = "./ndarray" }
+safetensors = "0.7.0"
+memmap2 = "0.9.9"
+image = "0.25"
+num = "0.4.3"
+fast-math = "0.1.1"
 
 [workspace]
 members = [

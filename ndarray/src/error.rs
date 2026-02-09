@@ -10,4 +10,5 @@ pub enum NdArrayError {
     DtypeMismatch(String),
     InvalidBufferSize(String),
     Misaligned(String),
+    NotImplement,
 }

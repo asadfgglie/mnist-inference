@@ -42,6 +42,10 @@ pub trait NdArrayLike<T> {
     where Self: Sized, T: 'a {
         NdArrayDataIndexIterator::new(self).expect("this should not happen")
     }
+    fn iter<'a, 'b: 'a>(&'b self) -> NdArrayIterator<'a, Self, T>
+    where Self: Sized {
+        NdArrayIterator::new(self).expect("this should not happen")
+    }
 
     // shape-related op
     fn reshape<'a, 'b: 'a>(&'b self, shape: NdArrayIndex) -> Result<NdArrayView<'a, T>, NdArrayError> {

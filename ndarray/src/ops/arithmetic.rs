@@ -1,11 +1,10 @@
 use crate::array::{NdArray, NdArrayView};
-use crate::axis::{compute_stride, broadcast_array, broadcast_shapes, compute_index};
+use crate::axis::{broadcast_array, broadcast_shapes, compute_index, compute_stride};
 use crate::iterator::IndexIterator;
 use crate::scalar::Scalar;
-use crate::{assign_op, assign_scalar_op, eco_op_scalar, general_assign_op, general_eco_op_scalar,
-            general_no_eco_op_scalar, general_op, no_eco_op_scalar, op, ref_assign_op, ref_eco_op_scalar,
-            ref_no_eco_op_scalar, ref_op, ref_view_op, scalar_assign_op, scalar_op};
+use crate::{assign_op, assign_scalar_op, eco_op_scalar, general_assign_op, general_eco_op_scalar, general_no_eco_op_scalar, general_op, no_eco_op_scalar, op, ref_assign_op, ref_eco_op_scalar, ref_no_eco_op_scalar, ref_op, ref_view_op, scalar_assign_op, scalar_op};
 use crate::{NdArrayIndex, NdArrayLike};
+use num::Zero;
 use std::iter::zip;
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
 
@@ -29,7 +28,8 @@ scalar_assign_op!{
     (/=, DivAssign, div_assign), (%=, RemAssign, rem_assign)
 }
 
-pub fn matmul<L: Clone + Mul<Output=L> + Add<Output=L>, R: Into<L> + Clone>(lhs: & impl NdArrayLike<L>, rhs: & impl NdArrayLike<R>) -> NdArray<L> {
+pub fn matmul<L, R>(lhs: & impl NdArrayLike<L>, rhs: & impl NdArrayLike<R>) -> NdArray<L>
+where L: Clone + Mul<Output=L> + Add<Output=L> + Zero, R: Into<L> + Clone {
     if lhs.shape().len() == 1 && rhs.shape().len() == 1 { // vector dot product
         if lhs.shape() != rhs.shape() {
             panic!(
@@ -38,21 +38,14 @@ pub fn matmul<L: Clone + Mul<Output=L> + Add<Output=L>, R: Into<L> + Clone>(lhs:
             )
         }
 
-        let mut ret: Vec<L> = Vec::with_capacity(1);
+        let mut ret = L::zero();
         for index in lhs.iter_index() {
             let tmp: L = lhs.data()[lhs.compute_index(&index)].clone() * rhs.data()[rhs.compute_index(&index)].clone().into();
 
-            match ret.is_empty() {
-                true => ret.push(tmp),
-                false => {
-                    let v = ret.pop().unwrap();
-                    ret.push(v + tmp);
-                }
-            }
+            ret = ret + tmp;
         }
 
-        assert_eq!(ret.len(), 1);
-        NdArray::new(ret)
+        NdArray::new(vec![ret])
     } else if lhs.shape().len() == 1 && rhs.shape().len() > 1 {
         let lhs = match lhs.unsqueeze(0) {
             Ok(l) => l,
@@ -107,18 +100,18 @@ pub fn matmul<L: Clone + Mul<Output=L> + Add<Output=L>, R: Into<L> + Clone>(lhs:
         data_shape.push(m);
         data_shape.push(n);
         let data_shape: NdArrayIndex = data_shape.into();
-        let mut data: Vec<L> = Vec::with_capacity(data_shape.iter().product());
+        let mut data: Vec<L> = vec![L::zero(); data_shape.iter().product()];
         let data_stride: NdArrayIndex = compute_stride(&data_shape);
         let data_offset = 0;
 
-        for batch_size_index in IndexIterator::iter_shape(&broadcast_batch_shape).expect("this should not happen") {
+        let mut inner = |batch_size_index: NdArrayIndex| {
             for i in 0..m {
                 for j in 0..n {
                     let mut data_index = batch_size_index.to_vec();
                     data_index.push(i);
                     data_index.push(j);
 
-                    let mut tmp_ret: Vec<L> = Vec::with_capacity(1);
+                    let mut tmp_ret = L::zero();
 
                     for k in 0..p {
                         let mut lhs_index = batch_size_index.to_vec();
@@ -131,18 +124,19 @@ pub fn matmul<L: Clone + Mul<Output=L> + Add<Output=L>, R: Into<L> + Clone>(lhs:
                         rhs_index.push(j);
 
                         let tmp = lhs[lhs_index].clone() * rhs[rhs_index].clone().into();
-                        match tmp_ret.is_empty() {
-                            true => tmp_ret.push(tmp),
-                            false => {
-                                let v = tmp_ret.pop().unwrap();
-                                tmp_ret.push(v + tmp);
-                            }
-                        }
+                        tmp_ret = tmp_ret + tmp;
                     }
 
-                    assert_eq!(tmp_ret.len(), 1);
-                    data[compute_index(&data_index, &data_stride, data_offset)] = tmp_ret.pop().unwrap();
+                    data[compute_index(&data_index, &data_stride, data_offset)] = tmp_ret;
                 }
+            }
+        };
+
+        if broadcast_batch_shape.is_empty() {
+            inner(NdArrayIndex::Dim0([]));
+        } else {
+            for batch_size_index in IndexIterator::iter_shape(&broadcast_batch_shape).expect("this should not happen") {
+                inner(batch_size_index);
             }
         }
 
@@ -153,4 +147,20 @@ pub fn matmul<L: Clone + Mul<Output=L> + Add<Output=L>, R: Into<L> + Clone>(lhs:
             lhs.shape(), rhs.shape()
         )
     }
+}
+
+pub fn relu<T: Zero + PartialOrd + Clone>(array: & impl NdArrayLike<T>) -> NdArray<T> {
+    let shape: NdArrayIndex = array.shape().into();
+    let mut data = Vec::with_capacity(shape.iter().product());
+    data.extend(array.iter()
+        .map(|x| {
+            if *x >= T::zero() {
+                x.clone()
+            } else {
+                T::zero()
+            }
+        })
+    );
+
+    NdArray::new_shape_with_index(data, shape)
 }
