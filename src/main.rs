@@ -82,4 +82,19 @@ fn main() {
     ret /= dim;
 
     println!("{:?}", ret);
+
+    let (argmax, prob) = ret.data()
+        .iter()
+        .enumerate()
+        .scan((0, 0.0), |(max_i, max), (i, &x)| {
+            if x > *max {
+                *max = x;
+                *max_i = i;
+            }
+            Some((*max_i, *max))
+        })
+        .last()
+        .unwrap();
+
+    println!("this is `{argmax}` with probability `{prob}`");
 }
