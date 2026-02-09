@@ -36,7 +36,6 @@ macro_rules! scalar_assign_op {
     };
 }
 
-
 /// basic `&NdArray`/`NdArray` operation with `&NdArray`/`NdArray`
 #[macro_export]
 macro_rules! op {
@@ -603,8 +602,8 @@ macro_rules! general_no_eco_op_scalar {
 #[macro_export]
 macro_rules! general_eco_op_scalar {
     ($op:tt, $op_trait:ident, $op_fn:ident) => {
-        eco_op_scalar!{$op, $op_trait, $op_fn}
-        ref_eco_op_scalar!{(NdArrayView), [($op, $op_trait, $op_fn)]}
+        eco_op_scalar! {$op, $op_trait, $op_fn}
+        ref_eco_op_scalar! {(NdArrayView), [($op, $op_trait, $op_fn)]}
     };
 }
 

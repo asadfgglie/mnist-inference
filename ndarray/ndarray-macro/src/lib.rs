@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
-use quote::{format_ident, quote, ToTokens};
+use quote::{ToTokens, format_ident, quote};
 use syn::parse::{Parse, ParseStream, Result};
 use syn::punctuated::Punctuated;
-use syn::{parse_macro_input, Expr, LitInt, Token};
+use syn::{Expr, LitInt, Token, parse_macro_input};
 
 #[proc_macro]
 pub fn nd_array_index(max_dim: TokenStream) -> TokenStream {
@@ -192,16 +192,38 @@ impl ToTokens for UsizeExpr {
     }
 }
 
-enum Slice {                                                            // py means    rust means
-    Step { step: UsizeExpr },                                           // ::2      or (..).step_by(2)
-    All,                                                                // :        or ..
-    RangeTo { end: UsizeExpr },                                         // :3       or ..3
-    RangeToStep { end: UsizeExpr, step: UsizeExpr },                    // :3:2     or (..3).step_by(2)
-    Index { index: UsizeExpr },                                         // 0
-    RangeFromStep { start: UsizeExpr, step: UsizeExpr },                // 1::2     or (1..).step_by(2)
-    RangeFrom { start: UsizeExpr },                                     // 1:       or 1..
-    Range { start: UsizeExpr, end: UsizeExpr },                         // 1:3      or 1..3
-    RangeStep { start: UsizeExpr, end: UsizeExpr, step: UsizeExpr },    // 1:10:2   or (1..10).step_by(2)
+enum Slice {
+    // py means    rust means
+    Step {
+        step: UsizeExpr,
+    }, // ::2      or (..).step_by(2)
+    All, // :        or ..
+    RangeTo {
+        end: UsizeExpr,
+    }, // :3       or ..3
+    RangeToStep {
+        end: UsizeExpr,
+        step: UsizeExpr,
+    }, // :3:2     or (..3).step_by(2)
+    Index {
+        index: UsizeExpr,
+    }, // 0
+    RangeFromStep {
+        start: UsizeExpr,
+        step: UsizeExpr,
+    }, // 1::2     or (1..).step_by(2)
+    RangeFrom {
+        start: UsizeExpr,
+    }, // 1:       or 1..
+    Range {
+        start: UsizeExpr,
+        end: UsizeExpr,
+    }, // 1:3      or 1..3
+    RangeStep {
+        start: UsizeExpr,
+        end: UsizeExpr,
+        step: UsizeExpr,
+    }, // 1:10:2   or (1..10).step_by(2)
 }
 
 struct Slices(pub Punctuated<Slice, Token![,]>);
@@ -221,7 +243,9 @@ impl Parse for Slice {
     fn parse(input: ParseStream) -> Result<Self> {
         if input.peek(Token![::]) {
             input.parse::<Token![::]>()?;
-            Ok(Slice::Step { step: input.parse::<UsizeExpr>()?  })
+            Ok(Slice::Step {
+                step: input.parse::<UsizeExpr>()?,
+            })
         } else if input.peek(Token![:]) {
             input.parse::<Token![:]>()?;
 
@@ -248,7 +272,6 @@ impl Parse for Slice {
                 let start = index;
                 let step = input.parse::<UsizeExpr>()?;
                 Ok(Slice::RangeFromStep { start, step })
-
             } else if input.peek(Token![:]) {
                 input.parse::<Token![:]>()?;
 
@@ -282,7 +305,6 @@ impl Parse for Slices {
         Ok(Slices(slices))
     }
 }
-
 
 /// use python slice syntax
 /// ```cfg
@@ -322,35 +344,55 @@ impl Parse for Slices {
 #[proc_macro]
 pub fn slice(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as Slices);
-    let idents: Vec<_> = input.0.into_iter()
+    let idents: Vec<_> = input
+        .0
+        .into_iter()
         .map(|s| match s {
-            Slice::All => {quote! {
-                ::ndarray::axis::AxisSlice::All
-            }},
-            Slice::Index { index } => {quote! {
-                ::ndarray::axis::AxisSlice::Index{ index: #index }
-            }},
-            Slice::Range { start, end } => {quote! {
-                ::ndarray::axis::AxisSlice::Range { start: #start, end: #end }
-            }},
-            Slice::RangeFrom { start } => {quote! {
-                ::ndarray::axis::AxisSlice::RangeFrom { start: #start }
-            }},
-            Slice::RangeFromStep { start, step } => {quote! {
-                ::ndarray::axis::AxisSlice::RangeFromStep { start: #start, step: #step }
-            }},
-            Slice::RangeTo { end } => {quote! {
-                ::ndarray::axis::AxisSlice::RangeTo { end: #end }
-            }},
-            Slice::RangeToStep { end, step } => {quote! {
-                ::ndarray::axis::AxisSlice::RangeToStep { end: #end, step: #step }
-            }},
-            Slice::RangeStep { start, end, step } => {quote! {
-                ::ndarray::axis::AxisSlice::RangeStep { start: #start, end: #end, step: #step }
-            }},
-            Slice::Step { step } => {quote! {
-                ::ndarray::axis::AxisSlice::Step{ step: #step }
-            }},
+            Slice::All => {
+                quote! {
+                    ::ndarray::axis::AxisSlice::All
+                }
+            }
+            Slice::Index { index } => {
+                quote! {
+                    ::ndarray::axis::AxisSlice::Index{ index: #index }
+                }
+            }
+            Slice::Range { start, end } => {
+                quote! {
+                    ::ndarray::axis::AxisSlice::Range { start: #start, end: #end }
+                }
+            }
+            Slice::RangeFrom { start } => {
+                quote! {
+                    ::ndarray::axis::AxisSlice::RangeFrom { start: #start }
+                }
+            }
+            Slice::RangeFromStep { start, step } => {
+                quote! {
+                    ::ndarray::axis::AxisSlice::RangeFromStep { start: #start, step: #step }
+                }
+            }
+            Slice::RangeTo { end } => {
+                quote! {
+                    ::ndarray::axis::AxisSlice::RangeTo { end: #end }
+                }
+            }
+            Slice::RangeToStep { end, step } => {
+                quote! {
+                    ::ndarray::axis::AxisSlice::RangeToStep { end: #end, step: #step }
+                }
+            }
+            Slice::RangeStep { start, end, step } => {
+                quote! {
+                    ::ndarray::axis::AxisSlice::RangeStep { start: #start, end: #end, step: #step }
+                }
+            }
+            Slice::Step { step } => {
+                quote! {
+                    ::ndarray::axis::AxisSlice::Step{ step: #step }
+                }
+            }
         })
         .collect();
 

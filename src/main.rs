@@ -1,7 +1,7 @@
 use image::ImageReader;
 use memmap2::MmapOptions;
 use ndarray::ops::arithmetic::relu;
-use ndarray::{index, matmul, NdArray, NdArrayLike, Scalar};
+use ndarray::{NdArray, NdArrayLike, Scalar, index, matmul};
 use num::Zero;
 use safetensors::tensor::SafeTensors;
 use std::fs::File;
@@ -18,11 +18,13 @@ struct SimpleNN {
 }
 
 trait Forward<T> {
-    fn forward(&self, input: & impl NdArrayLike<T>) -> NdArray<T>;
+    fn forward(&self, input: &impl NdArrayLike<T>) -> NdArray<T>;
 }
 
-impl <T> Forward<T> for Linear<T>
-where T: Add<Output=T> + Clone + Mul<Output=T> + Zero {
+impl<T> Forward<T> for Linear<T>
+where
+    T: Add<Output = T> + Clone + Mul<Output = T> + Zero,
+{
     fn forward(&self, input: &impl NdArrayLike<T>) -> NdArray<T> {
         // input: (batch_size, in_features)
         let ret: NdArray<T> = matmul(input, &self.weight.transpose(0, 1).unwrap());
@@ -52,8 +54,14 @@ fn main() {
     let fc2_bias: NdArray<f32> = tensors.tensor("fc2.bias").unwrap().try_into().unwrap();
 
     let simple_nn = SimpleNN {
-        fc1: Linear { weight: fc1_weight, bias: Some(fc1_bias) },
-        fc2: Linear { weight: fc2_weight, bias: Some(fc2_bias) },
+        fc1: Linear {
+            weight: fc1_weight,
+            bias: Some(fc1_bias),
+        },
+        fc2: Linear {
+            weight: fc2_weight,
+            bias: Some(fc2_bias),
+        },
     };
 
     let img = ImageReader::open("./test_data/2.bmp")
@@ -72,18 +80,19 @@ fn main() {
         .map(|pixel| pixel as f32 / 255.0)
         .collect();
 
-    let img = NdArray::new_shape(img, vec![28,28]);
-    let img = NdArray::reshape_array(img, index![1, 28*28]).unwrap();
+    let img = NdArray::new_shape(img, vec![28, 28]);
+    let img = NdArray::reshape_array(img, index![1, 28 * 28]).unwrap();
 
     let ret: NdArray<f32> = simple_nn.forward(&img);
 
-    let mut ret = ret.map(|&x| {fast_math::exp(x)});
+    let mut ret = ret.map(|&x| fast_math::exp(x));
     let dim: Scalar<f32> = Scalar(ret.iter().sum());
     ret /= dim;
 
     println!("{:?}", ret);
 
-    let (argmax, prob) = ret.data()
+    let (argmax, prob) = ret
+        .data()
         .iter()
         .enumerate()
         .scan((0, 0.0), |(max_i, max), (i, &x)| {

@@ -1,26 +1,48 @@
+use crate::{NdArrayError, NdArrayIndex, NdArrayLike, NdArrayView};
 use std::cmp::max;
 use std::iter::zip;
-use crate::{NdArrayError, NdArrayIndex, NdArrayLike, NdArrayView};
 
 pub use ndarray_macro::slice;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum AxisSlice {                                        // py means    rust means
-    All,                                                    // :        or ..
-    Index { index: usize },                                 // 0
-    Range { start: usize, end: usize },                     // 1:3      or 1..3
-    RangeFrom { start: usize },                             // 1:       or 1..
-    RangeFromStep { start: usize, step: usize },            // 1::2     or (1..).step_by(2)
-    RangeTo { end: usize },                                 // :3       or ..3
-    RangeToStep { end: usize, step: usize },                // :3:2     or (..3).step_by(2)
-    RangeStep { start: usize, end: usize, step: usize },    // 1:10:2   or (1..10).step_by(2)
-    Step { step: usize },                                   // ::2      or (..).step_by(2)
+pub enum AxisSlice {
+    // py means    rust means
+    All, // :        or ..
+    Index {
+        index: usize,
+    }, // 0
+    Range {
+        start: usize,
+        end: usize,
+    }, // 1:3      or 1..3
+    RangeFrom {
+        start: usize,
+    }, // 1:       or 1..
+    RangeFromStep {
+        start: usize,
+        step: usize,
+    }, // 1::2     or (1..).step_by(2)
+    RangeTo {
+        end: usize,
+    }, // :3       or ..3
+    RangeToStep {
+        end: usize,
+        step: usize,
+    }, // :3:2     or (..3).step_by(2)
+    RangeStep {
+        start: usize,
+        end: usize,
+        step: usize,
+    }, // 1:10:2   or (1..10).step_by(2)
+    Step {
+        step: usize,
+    }, // ::2      or (..).step_by(2)
 }
-
 
 /// base on shape, return row-major contiguous stride
 pub(crate) fn compute_stride(shape: &[usize]) -> NdArrayIndex {
-    shape.iter()
+    shape
+        .iter()
         .rev()
         .scan(1, |acc, x| {
             let tmp = *acc;
@@ -78,13 +100,16 @@ pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<NdArrayIndex, Nd
             break;
         }
 
-        let (l, r) = (match l {
-            Some(x) => *x,
-            None => 1
-        }, match r {
-            Some(x) => *x,
-            None => 1
-        });
+        let (l, r) = (
+            match l {
+                Some(x) => *x,
+                None => 1,
+            },
+            match r {
+                Some(x) => *x,
+                None => 1,
+            },
+        );
 
         if l == 1 || r == 1 {
             ret.push(max(l, r))
@@ -92,15 +117,15 @@ pub fn broadcast_shapes(lhs: &[usize], rhs: &[usize]) -> Result<NdArrayIndex, Nd
             ret.push(l)
         } else {
             return Err(NdArrayError::BroadcastError(format!(
-                "Shapes {:?} and {:?} are incompatible for broadcasting.", lhs, rhs
-            )))
+                "Shapes {:?} and {:?} are incompatible for broadcasting.",
+                lhs, rhs
+            )));
         }
-    };
+    }
 
     ret.reverse();
     Ok(ret.into())
 }
-
 
 /// return Vec<(block_elements, base_stride)>
 pub(crate) fn compute_shape_block(shape: &[usize], stride: &[usize]) -> Vec<(usize, usize)> {
@@ -146,27 +171,35 @@ pub(crate) fn compute_shape_block(shape: &[usize], stride: &[usize]) -> Vec<(usi
     blocks
 }
 
-pub(crate) fn compute_reshape_strides(old_shape: &[usize], old_stride: &[usize], reshape: &[usize]) -> Result<NdArrayIndex, NdArrayError> {
+pub(crate) fn compute_reshape_strides(
+    old_shape: &[usize],
+    old_stride: &[usize],
+    reshape: &[usize],
+) -> Result<NdArrayIndex, NdArrayError> {
     if old_shape.is_empty() {
-        return Err(NdArrayError::InvalidShapeError("shape is empty!".into()))
+        return Err(NdArrayError::InvalidShapeError("shape is empty!".into()));
     }
 
     if old_shape.len() != old_stride.len() {
         return Err(NdArrayError::InvalidShapeError(format!(
             "Shape len and stride len doesn't match. shape len: {}, stride len: {}",
-            old_shape.len(), old_stride.len()
-        )))
+            old_shape.len(),
+            old_stride.len()
+        )));
     }
 
     if old_shape.iter().product::<usize>() != reshape.iter().product::<usize>() {
         return Err(NdArrayError::ReshapeError(format!(
             "Unable turn shape {:?} ({}) into new shape {:?} ({}) since element number mismatch.",
-            old_shape, old_shape.iter().product::<usize>(), reshape, reshape.iter().product::<usize>()
-        )))
+            old_shape,
+            old_shape.iter().product::<usize>(),
+            reshape,
+            reshape.iter().product::<usize>()
+        )));
     }
 
     if old_shape.iter().product::<usize>() == 0 {
-        return Ok(reshape.into())
+        return Ok(reshape.into());
     }
 
     let err = Err(NdArrayError::IncompatibleReshapeError(format!(
@@ -180,7 +213,7 @@ pub(crate) fn compute_reshape_strides(old_shape: &[usize], old_stride: &[usize],
 
         let mut current_elements = match reshape_iter.next() {
             Some(&x) => x,
-            None => return err
+            None => return err,
         };
         let mut next_d = current_elements;
 
@@ -191,7 +224,7 @@ pub(crate) fn compute_reshape_strides(old_shape: &[usize], old_stride: &[usize],
                     if current_elements == block_elements {
                         break;
                     }
-                    return err
+                    return err;
                 }
             };
             current_elements *= d;
@@ -208,7 +241,11 @@ pub(crate) fn compute_reshape_strides(old_shape: &[usize], old_stride: &[usize],
     Ok(stride.into())
 }
 
-pub(crate) fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize], broadcast_shape: &[usize]) -> Result<NdArrayIndex, NdArrayError> {
+pub(crate) fn compute_broadcast_strides(
+    old_shape: &[usize],
+    old_stride: &[usize],
+    broadcast_shape: &[usize],
+) -> Result<NdArrayIndex, NdArrayError> {
     let mut strides: Vec<usize> = Vec::with_capacity(broadcast_shape.len());
 
     let mut old_shape_iter = old_shape.iter().rev();
@@ -222,20 +259,26 @@ pub(crate) fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize
             break;
         }
 
-        let (o, b) = (match o {
-            Some(x) => *x,
-            None => 0 // hidden broadcast dimension, you can treat as unsqueeze axis
-        }, match b {
-            Some(x) => *x,
-            None => return Err(NdArrayError::BroadcastError(format!(
-                "broadcast_shape shorter than old_array.shape, broadcast_shape len: {}, \
+        let (o, b) = (
+            match o {
+                Some(x) => *x,
+                None => 0, // hidden broadcast dimension, you can treat as unsqueeze axis
+            },
+            match b {
+                Some(x) => *x,
+                None => {
+                    return Err(NdArrayError::BroadcastError(format!(
+                        "broadcast_shape shorter than old_array.shape, broadcast_shape len: {}, \
                                 old_array.shape len: {}",
-                broadcast_shape.len(),
-                old_shape.len()
-            )))
-        });
+                        broadcast_shape.len(),
+                        old_shape.len()
+                    )));
+                }
+            },
+        );
 
-        if (o == 1 || o == 0) && b > o { // this is the broadcast dimension,
+        if (o == 1 || o == 0) && b > o {
+            // this is the broadcast dimension,
             // so stride is always 0
             strides.push(0)
         } else {
@@ -248,7 +291,6 @@ pub(crate) fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize
     strides.reverse();
     Ok(strides.into())
 }
-
 
 /// Broadcasts the shapes of two `NdArray` objects to ensure compatibility for operations
 /// that require aligned shapes (e.g., element-wise operations).
@@ -306,8 +348,10 @@ pub(crate) fn compute_broadcast_strides(old_shape: &[usize], old_stride: &[usize
 /// - Strides for broadcasted dimensions are set to `0` to ensure proper indexing behavior.
 /// - The function clones the computed broadcast shape to ensure immutability and avoid accidental
 ///   modifications during stride computation.
-pub fn broadcast_array<'a, 'b, 'c: 'a, 'd: 'b, L, R>(lhs: &'c impl NdArrayLike<L>, rhs: &'d impl NdArrayLike<R>)
-                                                     -> Result<(NdArrayView<'a, L>, NdArrayView<'b, R>), NdArrayError> {
+pub fn broadcast_array<'a, 'b, 'c: 'a, 'd: 'b, L, R>(
+    lhs: &'c impl NdArrayLike<L>,
+    rhs: &'d impl NdArrayLike<R>,
+) -> Result<(NdArrayView<'a, L>, NdArrayView<'b, R>), NdArrayError> {
     match broadcast_shapes(lhs.shape(), rhs.shape()) {
         Ok(broadcast_shape) => {
             let rhs_shape = broadcast_shape.clone();
@@ -316,10 +360,12 @@ pub fn broadcast_array<'a, 'b, 'c: 'a, 'd: 'b, L, R>(lhs: &'c impl NdArrayLike<L
             let lhs_strides = compute_broadcast_strides(lhs.shape(), lhs.strides(), &lhs_shape)?;
             let rhs_strides = compute_broadcast_strides(rhs.shape(), rhs.strides(), &rhs_shape)?;
 
-            Ok((NdArrayView::new(lhs.data(), lhs_shape, lhs_strides, lhs.base_offset()),
-                NdArrayView::new(rhs.data(), rhs_shape, rhs_strides, rhs.base_offset())))
+            Ok((
+                NdArrayView::new(lhs.data(), lhs_shape, lhs_strides, lhs.base_offset()),
+                NdArrayView::new(rhs.data(), rhs_shape, rhs_strides, rhs.base_offset()),
+            ))
         }
-        Err(e) => Err(e)
+        Err(e) => Err(e),
     }
 }
 
@@ -332,28 +378,39 @@ pub(crate) fn compute_index(indices: &[usize], strides: &[usize], base_offset: u
         );
     }
 
-    indices.iter()
+    indices
+        .iter()
         .enumerate()
-        .fold(0, |acc, (axis, &x)| acc + x * strides[axis]) + base_offset
+        .fold(0, |acc, (axis, &x)| acc + x * strides[axis])
+        + base_offset
 }
 
-pub(crate) fn validate_view(data_bound: usize, view_offset: usize, view_shape: &[usize], view_stride: &[usize]) -> Result<(), NdArrayError> {
+pub(crate) fn validate_view(
+    data_bound: usize,
+    view_offset: usize,
+    view_shape: &[usize],
+    view_stride: &[usize],
+) -> Result<(), NdArrayError> {
     if view_shape.contains(&0) {
-        Err(NdArrayError::InvalidShapeError("shape contains 0 is not allowed.".into()))
+        Err(NdArrayError::InvalidShapeError(
+            "shape contains 0 is not allowed.".into(),
+        ))
     } else if view_shape.len() != view_stride.len() {
         Err(NdArrayError::InvalidStridesError(format!(
-            "view_shape.len() ({}) != view_stride.len() ({})", view_shape.len(), view_stride.len()
+            "view_shape.len() ({}) != view_stride.len() ({})",
+            view_shape.len(),
+            view_stride.len()
         )))
     } else {
         let mut last_index = Vec::with_capacity(view_shape.len());
         for d in view_shape.iter() {
             last_index.push(d - 1);
         }
-        
+
         let max_offset = compute_index(&last_index, view_stride, view_offset);
         if max_offset < data_bound {
             Ok(())
-        } else { 
+        } else {
             Err(NdArrayError::InvalidStridesError(format!(
                 "view will out of bound. view_offset: {}, view_shape: {:?}, view_stride: {:?}, data_bound: {}, \
                 last_index: {:?} => offset: {}",

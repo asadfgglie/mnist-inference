@@ -1,8 +1,8 @@
-use half::{bf16, f16};
-use float8::{F8E5M2, F8E4M3};
-use safetensors::Dtype;
-use num_complex::Complex32;
 use crate::HasDtype;
+use float8::{F8E4M3, F8E5M2};
+use half::{bf16, f16};
+use num_complex::Complex32;
+use safetensors::Dtype;
 
 /// ```
 /// use ndarray::HasDtype;
