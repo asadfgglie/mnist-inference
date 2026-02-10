@@ -245,7 +245,7 @@ macro_rules! ref_view_op {
                         data.push(l $op r.into())
                     }
 
-                    Self::Output::new_shape_with_index(data, lhs.shape)
+                    Self::Output::new_shape(data, lhs.shape)
                 }
             }
         )+

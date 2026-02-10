@@ -184,5 +184,5 @@ pub fn relu<T: Zero + PartialOrd + Clone>(array: &impl NdArrayLike<T>) -> NdArra
         }
     }));
 
-    NdArray::new_shape_with_index(data, shape)
+    NdArray::new_shape(data, shape)
 }

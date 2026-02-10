@@ -112,16 +112,14 @@ impl<T> NdArray<T> {
             Err(e) => panic!("{:?}", e),
         }
     }
-    pub fn new_shape_with_index(data: Vec<T>, shape: NdArrayIndex) -> Self {
+    pub fn new_shape(data: impl Into<Box<[T]>>, shape: impl Into<NdArrayIndex>) -> Self {
+        let shape = shape.into();
         let stride = compute_stride(&shape);
-
-        Self::new_array(data.into_boxed_slice(), shape, stride, 0)
+        Self::new_array(data.into(), shape, stride, 0)
     }
-    pub fn new_shape(data: Vec<T>, shape: Vec<usize>) -> Self {
-        Self::new_shape_with_index(data, shape.into())
-    }
-    pub fn new(data: Vec<T>) -> Self {
-        let shape = vec![data.len()];
+    pub fn new(data: impl Into<Box<[T]>>) -> Self {
+        let data = data.into();
+        let shape = index![data.len()];
         Self::new_shape(data, shape)
     }
 
@@ -208,7 +206,7 @@ impl<T: Clone> NdArray<T> {
         } else {
             let mut data: Vec<T> = Vec::with_capacity(self.shape.iter().product());
             data.extend(self.into_iter().cloned());
-            Self::new_shape_with_index(data, self.shape.clone())
+            Self::new_shape(data, self.shape)
         }
     }
     pub fn contiguous_self(&mut self) {
@@ -355,7 +353,7 @@ impl<T: Clone> From<NdArrayView<'_, T>> for NdArray<T> {
     fn from(value: NdArrayView<T>) -> Self {
         let mut data = Vec::with_capacity(value.shape.iter().product());
         data.extend(value.into_iter().cloned());
-        Self::new_shape_with_index(data, value.shape)
+        Self::new_shape(data, value.shape)
     }
 }
 

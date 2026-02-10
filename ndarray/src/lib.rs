@@ -181,7 +181,7 @@ pub trait NdArrayLike<T> {
         for indices in self.iter_index().collect::<Vec<NdArrayIndex>>() {
             data.push(f(&self.data()[self.compute_index(&indices)]));
         }
-        NdArray::new_shape_with_index(data, self.shape().into())
+        NdArray::new_shape(data, self.shape())
     }
 
     fn slice<'a, 'b: 'a>(
